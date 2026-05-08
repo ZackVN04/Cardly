@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Any
 
 from pydantic import BaseModel
 
@@ -8,13 +7,11 @@ from src.core.pagination import PaginatedResponse
 
 class ActivityLogResponse(BaseModel):
     id: str
-    contact_id: str
-    owner_id: str
+    user_id: str
     action: str
-    source: str
-    changed_fields: list[str] = []
-    previous_values: dict[str, Any] = {}
-    new_values: dict[str, Any] = {}
+    entity_type: str
+    entity_id: str
+    detail: dict | None = None
     created_at: datetime
 
 

@@ -1,9 +1,4 @@
-import re
-from datetime import datetime
-
 from pydantic import BaseModel, EmailStr, field_validator
-
-_USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{3,30}$")
 
 
 class UserCreate(BaseModel):
@@ -14,17 +9,10 @@ class UserCreate(BaseModel):
 
     @field_validator("username")
     @classmethod
-    def username_valid(cls, v: str) -> str:
-        if not _USERNAME_RE.match(v):
-            raise ValueError("3–30 chars, letters/digits/underscore only")
-        return v
-
-    @field_validator("password")
-    @classmethod
-    def password_min_length(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters")
-        return v
+    def username_alphanumeric(cls, v: str) -> str:
+        if not v.replace("_", "").isalnum():
+            raise ValueError("Username must be alphanumeric (underscores allowed)")
+        return v.lower()
 
 
 class UserLogin(BaseModel):
@@ -44,8 +32,6 @@ class UserResponse(BaseModel):
     full_name: str
     avatar_url: str | None = None
     bio: str | None = None
-    is_active: bool
-    created_at: datetime
 
 
 class UserUpdate(BaseModel):
@@ -55,15 +41,8 @@ class UserUpdate(BaseModel):
 
 
 class PasswordChange(BaseModel):
-    old_password: str
+    current_password: str
     new_password: str
-
-    @field_validator("new_password")
-    @classmethod
-    def password_min_length(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters")
-        return v
 
 
 class ForgotPasswordReq(BaseModel):
@@ -74,9 +53,6 @@ class ResetPasswordReq(BaseModel):
     token: str
     new_password: str
 
-    @field_validator("new_password")
-    @classmethod
-    def password_min_length(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters")
-        return v
+
+class DeleteAccountReq(BaseModel):
+    password: str

@@ -1,21 +1,21 @@
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 
 
 class ContactNotFound(HTTPException):
-    def __init__(self) -> None:
-        super().__init__(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
+    def __init__(self):
+        super().__init__(status_code=404, detail="Contact not found")
 
 
 class NotContactOwner(HTTPException):
-    def __init__(self) -> None:
-        super().__init__(status_code=status.HTTP_403_FORBIDDEN, detail="Not the contact owner")
+    def __init__(self):
+        super().__init__(status_code=403, detail="Not the contact owner")
 
 
 class TagAlreadyAdded(HTTPException):
-    def __init__(self) -> None:
-        super().__init__(status_code=status.HTTP_409_CONFLICT, detail="Tag already added to contact")
+    def __init__(self):
+        super().__init__(status_code=409, detail="Tag already added to contact")
 
 
 class TagNotOnContact(HTTPException):
-    def __init__(self) -> None:
-        super().__init__(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not on contact")
+    def __init__(self):
+        super().__init__(status_code=404, detail="Tag not found on contact")

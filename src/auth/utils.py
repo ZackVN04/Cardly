@@ -3,15 +3,13 @@ from datetime import datetime, timezone
 from jose import ExpiredSignatureError, JWTError, jwt
 
 from src.auth.constants import ALGORITHM, RESET_TOKEN_EXPIRE
-from src.auth.exceptions import ResetTokenExpired, TokenExpired, TokenInvalid
+from src.auth.exceptions import TokenExpired, TokenInvalid
 
 
-def create_jwt(data: dict, expire_delta: object, secret: str) -> str:
-    from datetime import timedelta
-
+def create_jwt(data: dict, expire_delta, secret: str) -> str:
     payload = data.copy()
-    expire = datetime.now(timezone.utc) + expire_delta  # type: ignore[operator]
-    payload["exp"] = expire
+    expire = datetime.now(timezone.utc) + expire_delta
+    payload.update({"exp": expire})
     return jwt.encode(payload, secret, algorithm=ALGORITHM)
 
 
@@ -29,10 +27,7 @@ def create_reset_token(email: str, secret: str) -> str:
 
 
 def verify_reset_token(token: str, secret: str) -> str:
-    try:
-        payload = verify_jwt(token, secret)
-    except (TokenExpired, TokenInvalid):
-        raise ResetTokenExpired()
+    payload = verify_jwt(token, secret)
     if payload.get("type") != "reset":
-        raise ResetTokenExpired()
+        raise TokenInvalid()
     return payload["sub"]

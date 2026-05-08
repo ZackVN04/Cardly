@@ -1,21 +1,16 @@
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 
 
 class CardNotFound(HTTPException):
-    def __init__(self) -> None:
-        super().__init__(status_code=status.HTTP_404_NOT_FOUND, detail="Digital card not found")
+    def __init__(self):
+        super().__init__(status_code=404, detail="Card not found")
 
 
-class SlugAlreadyTaken(HTTPException):
-    def __init__(self) -> None:
-        super().__init__(status_code=status.HTTP_409_CONFLICT, detail="Slug is already taken")
+class CardAlreadyExists(HTTPException):
+    def __init__(self):
+        super().__init__(status_code=409, detail="User already has a digital card")
 
 
-class UserAlreadyHasCard(HTTPException):
-    def __init__(self) -> None:
-        super().__init__(status_code=status.HTTP_409_CONFLICT, detail="User already has a digital card")
-
-
-class InvalidSlugFormat(HTTPException):
-    def __init__(self) -> None:
-        super().__init__(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid slug format")
+class SlugConflict(HTTPException):
+    def __init__(self):
+        super().__init__(status_code=409, detail="Slug already in use")

@@ -1,11 +1,11 @@
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 
 
 class EnrichmentNotFound(HTTPException):
-    def __init__(self) -> None:
-        super().__init__(status_code=status.HTTP_404_NOT_FOUND, detail="Enrichment result not found")
+    def __init__(self):
+        super().__init__(status_code=404, detail="Enrichment not found")
 
 
-class EnrichmentAlreadyRunning(HTTPException):
-    def __init__(self) -> None:
-        super().__init__(status_code=status.HTTP_409_CONFLICT, detail="Enrichment already running for this contact")
+class EnrichmentFailed(HTTPException):
+    def __init__(self):
+        super().__init__(status_code=422, detail="AI enrichment failed")

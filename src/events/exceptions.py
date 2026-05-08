@@ -1,11 +1,11 @@
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 
 
 class EventNotFound(HTTPException):
-    def __init__(self) -> None:
-        super().__init__(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+    def __init__(self):
+        super().__init__(status_code=404, detail="Event not found")
 
 
 class NotEventOwner(HTTPException):
-    def __init__(self) -> None:
-        super().__init__(status_code=status.HTTP_403_FORBIDDEN, detail="Not the event owner")
+    def __init__(self):
+        super().__init__(status_code=403, detail="Not the event owner")

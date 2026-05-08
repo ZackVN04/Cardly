@@ -1,5 +1,3 @@
-from src.contacts.exceptions import ContactNotFound, NotContactOwner
-
-# Implementation: Phase 3 — W4 (Huy)
-# get_contact_or_404(contact_id, db) -> ContactDoc
-# verify_contact_owner(contact, current_user)
+# Implementation: Phase 3 — W6 (Khanh)
+# get_contact_or_404(contact_id: str, db) -> ContactDoc
+# verify_contact_owner(contact: ContactDoc, current_user: dict) -> None
