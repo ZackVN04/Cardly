@@ -1,0 +1,29 @@
+from fastapi import Depends
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+from src.auth.exceptions import TokenInvalid
+from src.auth.utils import verify_jwt
+from src.core.config import settings
+from src.database import get_users_collection
+
+_bearer = HTTPBearer()
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
+) -> dict:
+    payload = verify_jwt(credentials.credentials, settings.JWT_SECRET)
+    user_id = payload.get("sub")
+    if not user_id:
+        raise TokenInvalid()
+
+    from bson import ObjectId
+
+    users = get_users_collection()
+    user = await users.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        raise TokenInvalid()
+    return user
+
+
+require_auth = Depends(get_current_user)

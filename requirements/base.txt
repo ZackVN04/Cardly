@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+motor
+pydantic[email]
+pydantic-settings
+bcrypt
+python-jose[cryptography]
+httpx
+qrcode[pil]
+google-cloud-storage
+slowapi
+python-multipart
