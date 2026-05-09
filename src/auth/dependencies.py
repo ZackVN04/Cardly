@@ -15,7 +15,7 @@ async def get_current_user(
     user_id = payload.get("sub")
     if not user_id:
         raise TokenInvalid()
-    return {"user_id": user_id}
+    return {"_id": user_id}
 
 
 require_auth = Depends(get_current_user)
