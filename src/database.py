@@ -39,11 +39,11 @@ def get_contacts_collection() -> AsyncIOMotorCollection:
 
 
 def get_scans_collection() -> AsyncIOMotorCollection:
-    return get_database()["scans"]
+    return get_database()["business_card_scans"]
 
 
 def get_enrichments_collection() -> AsyncIOMotorCollection:
-    return get_database()["enrichments"]
+    return get_database()["enrichment_results"]
 
 
 def get_tags_collection() -> AsyncIOMotorCollection:
@@ -55,11 +55,11 @@ def get_events_collection() -> AsyncIOMotorCollection:
 
 
 def get_cards_collection() -> AsyncIOMotorCollection:
-    return get_database()["cards"]
+    return get_database()["digital_cards"]
 
 
 def get_activity_logs_collection() -> AsyncIOMotorCollection:
-    return get_database()["activity_logs"]
+    return get_database()["contact_activity_logs"]
 
 
 async def create_indexes() -> None:
@@ -72,6 +72,9 @@ async def create_indexes() -> None:
 
     # contacts
     await db["contacts"].create_index("owner_id")
+    await db["contacts"].create_index("event_id")
+    await db["contacts"].create_index("tag_ids")
+    await db["contacts"].create_index("scan_id")
     await db["contacts"].create_index([("full_name", "text"), ("company", "text")])
 
     # tags
@@ -80,17 +83,18 @@ async def create_indexes() -> None:
     # events
     await db["events"].create_index("owner_id")
 
-    # scans
-    await db["scans"].create_index("owner_id")
+    # business_card_scans
+    await db["business_card_scans"].create_index("owner_id")
+    await db["business_card_scans"].create_index("status")
 
-    # enrichments
-    await db["enrichments"].create_index("owner_id")
-    await db["enrichments"].create_index("contact_id")
+    # enrichment_results
+    await db["enrichment_results"].create_index("contact_id", unique=True)
 
-    # cards
-    await db["cards"].create_index("slug", unique=True)
-    await db["cards"].create_index("owner_id", unique=True)
+    # digital_cards
+    await db["digital_cards"].create_index("slug", unique=True)
+    await db["digital_cards"].create_index("user_id")
 
-    # activity_logs
-    await db["activity_logs"].create_index("user_id")
-    await db["activity_logs"].create_index("created_at")
+    # contact_activity_logs
+    await db["contact_activity_logs"].create_index("contact_id")
+    await db["contact_activity_logs"].create_index("owner_id")
+    await db["contact_activity_logs"].create_index("created_at")
