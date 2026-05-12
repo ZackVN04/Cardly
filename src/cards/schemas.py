@@ -1,4 +1,6 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
+
+from bson import ObjectId
 
 
 class CardCreate(BaseModel):
@@ -26,7 +28,7 @@ class CardUpdate(BaseModel):
 
 
 class CardResponse(BaseModel):
-    id: str
+    id: str = Field(validation_alias="_id")
     owner_id: str
     slug: str
     title: str | None = None
@@ -40,3 +42,12 @@ class CardResponse(BaseModel):
     is_public: bool
     qr_code_url: str | None = None
     view_count: int = 0
+
+    model_config = {"populate_by_name": True, "from_attributes": True}
+
+    @field_validator("id", "owner_id", mode="before")
+    @classmethod
+    def coerce_objectid(cls, v):
+        if isinstance(v, ObjectId):
+            return str(v)
+        return v

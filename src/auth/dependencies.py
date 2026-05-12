@@ -5,12 +5,14 @@ from src.auth.exceptions import TokenInvalid
 from src.auth.utils import verify_jwt
 from src.core.config import settings
 
-_bearer = HTTPBearer()
+_bearer = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> dict:
+    if credentials is None:
+        raise TokenInvalid()
     payload = verify_jwt(credentials.credentials, settings.JWT_SECRET)
     user_id = payload.get("sub")
     if not user_id:
