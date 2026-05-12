@@ -37,23 +37,7 @@ async def create(
 
     result = await db["events"].insert_one(doc)
 
-    # Fetch lại để có _id đầy đủ trong response — tránh trả doc thiếu _id
     inserted = await db["events"].find_one({"_id": result.inserted_id})
-
-    # Log sau insert — dùng inserted_id làm contact_id để trace trong activity log
-    await log_action(
-        db=db,
-        contact_id=result.inserted_id,
-        owner_id=owner_id,
-        action="created",
-        source="manual",
-        new_values={
-            "name": data.name,
-            "event_date": data.event_date.isoformat(),  # datetime → str để lưu vào log
-            "location": data.location,
-        },
-    )
-
     return inserted
 
 
@@ -185,21 +169,6 @@ async def update(
         return_document=ReturnDocument.AFTER,   # trả về doc SAU khi update
     )
 
-    # Serialize datetime trong log — MongoDB datetime không JSON-serializable
-    def _safe(v):
-        return v.isoformat() if isinstance(v, datetime) else v
-
-    await log_action(
-        db=db,
-        contact_id=event_id,
-        owner_id=owner_id,
-        action="updated",
-        source="user_edit",
-        changed_fields=list(update_fields.keys()),
-        previous_values={k: _safe(v) for k, v in previous_values.items()},
-        new_values={k: _safe(v) for k, v in update_fields.items()},
-    )
-
     return updated
 
 
@@ -225,27 +194,29 @@ async def delete_with_cascade(
     # Bước 3: xóa event VÀ nullify contacts đồng thời
     # asyncio.gather() đảm bảo cả 2 chạy song song — không để orphan event_id
     # update_many không filter theo owner_id vì event_id đã là unique reference
-    await asyncio.gather(
-        # Xóa event khỏi collection
-        db["events"].delete_one({"_id": event_id}),
+    # Lấy danh sách contacts bị ảnh hưởng TRƯỚC khi cascade để log đúng contact_id
+    affected_contacts = await db["contacts"].find(
+        {"event_id": event_id},
+        {"_id": 1},
+    ).to_list(length=None)
 
-        # Set event_id = None trên tất cả contacts liên kết
-        # $set thay vì $unset để giữ field tồn tại với giá trị null —
-        # nhất quán với schema (event_id: ObjectId | None)
+    await asyncio.gather(
+        db["events"].delete_one({"_id": event_id}),
         db["contacts"].update_many(
             {"event_id": event_id},
             {"$set": {"event_id": None}},
         ),
     )
 
-    await log_action(
-        db=db,
-        contact_id=event_id,
-        owner_id=owner_id,
-        action="deleted",
-        source="user_edit",
-        previous_values={
-            "name": event["name"],
-            "event_date": event["event_date"].isoformat(),
-        },
-    )
+    # Log action='updated' trên từng contact bị ảnh hưởng (spec: "Log on affected contacts")
+    for contact in affected_contacts:
+        await log_action(
+            db=db,
+            contact_id=contact["_id"],
+            owner_id=owner_id,
+            action="updated",
+            source="user_edit",
+            changed_fields=["event_id"],
+            previous_values={"event_id": str(event_id)},
+            new_values={"event_id": None},
+        )

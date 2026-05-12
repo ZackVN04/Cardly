@@ -1,11 +1,12 @@
-from pydantic import BaseModel, EmailStr, field_validator
+from bson import ObjectId
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class UserCreate(BaseModel):
-    username: str
+    username: str = Field(..., min_length=3, max_length=30)
     email: EmailStr
-    password: str
-    full_name: str
+    password: str = Field(..., min_length=8)
+    full_name: str = Field(..., min_length=1, max_length=100)
 
     @field_validator("username")
     @classmethod
@@ -26,12 +27,21 @@ class TokenResponse(BaseModel):
 
 
 class UserResponse(BaseModel):
-    id: str
+    id: str = Field(validation_alias="_id")
     username: str
     email: str
     full_name: str
     avatar_url: str | None = None
     bio: str | None = None
+
+    model_config = {"populate_by_name": True, "from_attributes": True}
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def coerce_id(cls, v):
+        if isinstance(v, ObjectId):
+            return str(v)
+        return v
 
 
 class UserUpdate(BaseModel):
@@ -41,7 +51,7 @@ class UserUpdate(BaseModel):
 
 
 class PasswordChange(BaseModel):
-    current_password: str
+    old_password: str
     new_password: str
 
 
@@ -51,7 +61,7 @@ class ForgotPasswordReq(BaseModel):
 
 class ResetPasswordReq(BaseModel):
     token: str
-    new_password: str
+    new_password: str = Field(..., min_length=8)
 
 
 class DeleteAccountReq(BaseModel):

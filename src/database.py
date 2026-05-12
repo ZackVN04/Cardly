@@ -8,8 +8,7 @@ _db: AsyncIOMotorDatabase | None = None
 
 async def connect_db() -> None:
     global _client, _db
-    # tlsAllowInvalidCertificates=True giải quyết lỗi TLSV1_ALERT_INTERNAL_ERROR
-    # thường gặp trên Windows khi kết nối MongoDB Atlas qua môi trường dev
+    # tlsAllowInvalidCertificates=True giải quyết lỗi SSL trên Windows dev
     _client = AsyncIOMotorClient(
         settings.MONGODB_URL,
         tlsAllowInvalidCertificates=True,

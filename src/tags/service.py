@@ -83,19 +83,7 @@ async def create(
     # insert_one trả InsertOneResult, lấy inserted_id để fetch lại doc đầy đủ
     result = await db["tags"].insert_one(doc)
 
-    # Fetch lại doc vừa insert để có _id — tránh giả định doc == inserted shape
     inserted = await db["tags"].find_one({"_id": result.inserted_id})
-
-    # Log sau khi insert thành công — fire-and-forget, không block response
-    await log_action(
-        db=db,
-        contact_id=result.inserted_id,  # dùng tag_id làm contact_id để trace
-        owner_id=owner_id,
-        action="created",
-        source="manual",
-        new_values={"name": data.name, "color": data.color},
-    )
-
     return inserted
 
 
@@ -169,18 +157,6 @@ async def update(
         return_document=ReturnDocument.AFTER,  # trả về doc sau khi update
     )
 
-    # Log sau khi update thành công
-    await log_action(
-        db=db,
-        contact_id=tag_id,
-        owner_id=owner_id,
-        action="updated",
-        source="user_edit",
-        changed_fields=list(update_fields.keys()),
-        previous_values=previous_values,
-        new_values=update_fields,
-    )
-
     return updated
 
 
@@ -205,24 +181,28 @@ async def delete_with_bulk_pull(
     # Bước 3: xóa tag VÀ gỡ khỏi contacts ĐỒNG THỜI
     # Dùng asyncio.gather() để tránh orphan tag_ids nếu chỉ làm 1 trong 2
     # delete_one và update_many đều idempotent nên an toàn khi chạy song song
-    await asyncio.gather(
-        # Xóa tag khỏi collection tags
-        db["tags"].delete_one({"_id": tag_id}),
+    # Lấy danh sách contacts bị ảnh hưởng TRƯỚC khi xóa để log đúng contact_id
+    affected_contacts = await db["contacts"].find(
+        {"owner_id": owner_id, "tag_ids": tag_id},
+        {"_id": 1},
+    ).to_list(length=None)
 
-        # Gỡ tag_id ra khỏi mảng tag_ids của tất cả contacts thuộc owner này
-        # $pull tự tìm và loại phần tử khớp trong array — không cần biết index
+    await asyncio.gather(
+        db["tags"].delete_one({"_id": tag_id}),
         db["contacts"].update_many(
-            {"owner_id": owner_id, "tag_ids": tag_id},  # chỉ target contacts của owner
+            {"owner_id": owner_id, "tag_ids": tag_id},
             {"$pull": {"tag_ids": tag_id}},
         ),
     )
 
-    # Log sau khi xóa thành công — ghi lại thông tin tag trước khi mất
-    await log_action(
-        db=db,
-        contact_id=tag_id,
-        owner_id=owner_id,
-        action="deleted",
-        source="user_edit",
-        previous_values={"name": tag["name"], "color": tag["color"]},
-    )
+    # Log action='tagged' trên từng contact bị ảnh hưởng (spec: "Log on affected contacts")
+    for contact in affected_contacts:
+        await log_action(
+            db=db,
+            contact_id=contact["_id"],
+            owner_id=owner_id,
+            action="tagged",
+            source="user_edit",
+            changed_fields=["tag_ids"],
+            previous_values={"tag_id": str(tag_id), "tag_name": tag["name"]},
+        )

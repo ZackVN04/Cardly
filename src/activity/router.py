@@ -103,7 +103,7 @@ async def list_all_activity(
 # và dễ cache/index về sau
 # ---------------------------------------------------------------------------
 
-@router.get("/contacts/{contact_id}", response_model=ActivityLogList)
+@router.get("/{contact_id}", response_model=ActivityLogList)
 async def list_activity_by_contact(
     contact_id: str,                         # path param — bắt buộc
     skip: int = Query(default=0, ge=0),
