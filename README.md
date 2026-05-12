@@ -17,6 +17,11 @@ cp .env.example .env
 
 pip install -r requirements/dev.txt
 uvicorn src.main:app --reload
+
+npm install -g gitnexus@latest
+
+# đọc file 
+gitnexus analyze
 ```
 
 ## Testing

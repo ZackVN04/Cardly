@@ -208,7 +208,7 @@ async def test_get_me(async_client, user):
 
 async def test_get_me_no_token(async_client):
     r = await async_client.get(f"{BASE}/me")
-    assert r.status_code == 403
+    assert r.status_code == 401
 
 
 async def test_get_me_invalid_token(async_client):
@@ -243,7 +243,7 @@ async def test_update_me_partial(async_client, user):
 
 async def test_update_me_no_token(async_client):
     r = await async_client.patch(f"{BASE}/me", json={"bio": "x"})
-    assert r.status_code == 403
+    assert r.status_code == 401
 
 
 # ---------------------------------------------------------------------------
@@ -293,7 +293,7 @@ async def test_change_password_no_token(async_client):
     r = await async_client.patch(f"{BASE}/me/password",
         json={"old_password": _PWD, "new_password": "NewPass456"},
     )
-    assert r.status_code == 403
+    assert r.status_code == 401
 
 
 # ---------------------------------------------------------------------------
@@ -443,4 +443,4 @@ async def test_delete_me_wrong_password(async_client, user):
 async def test_delete_me_no_token(async_client):
     r = await async_client.request("DELETE", f"{BASE}/me",
         json={"password": _PWD})
-    assert r.status_code == 403
+    assert r.status_code == 401
