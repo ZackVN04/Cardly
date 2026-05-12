@@ -1,5 +1,9 @@
+import pathlib
+import uuid
+from datetime import datetime
+
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from src.auth.dependencies import get_current_user
@@ -7,7 +11,10 @@ from src.contacts.schemas import ContactResponse
 from src.core.rate_limit import limiter
 from src.database import get_database
 from src.scans import service
+from src.scans.exceptions import FileTooLarge, UnsupportedFileType
 from src.scans.schemas import ConfirmScanRequest, ScanList, ScanPatch, ScanResponse
+from src.uploads.constants import ALLOWED_EXTENSIONS, ALLOWED_MIME_TYPES, MAX_FILE_SIZE
+from src.uploads.storage_client import upload_to_gcs
 
 router = APIRouter(prefix="/scans", tags=["scans"])
 
@@ -60,6 +67,7 @@ async def list_scans(
 @limiter.limit("10/minute")
 async def upload_scan(
     request: Request,
+    file: UploadFile = File(...),
     event_id: str | None = Query(default=None),
     current_user: dict = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_database),
@@ -67,19 +75,33 @@ async def upload_scan(
     """
     Upload ảnh danh thiếp → OCR async → trả 202 ngay.
     Client poll GET /{id} mỗi 2s đến khi status='completed'.
-    TODO W6: nhận UploadFile khi storage_client của Khanh sẵn sàng.
     """
+    if file.content_type not in ALLOWED_MIME_TYPES:
+        raise UnsupportedFileType()
+
+    content = await file.read()
+
+    if len(content) > MAX_FILE_SIZE:
+        raise FileTooLarge()
+
+    ext = pathlib.Path(file.filename or "").suffix.lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise UnsupportedFileType()
+
     owner_id = ObjectId(current_user["_id"])
+    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    unique_id = uuid.uuid4().hex[:8]
+    blob_name = f"scans/{owner_id}_{timestamp}_{unique_id}{ext}"
+    image_url = await upload_to_gcs(content, blob_name, file.content_type)
 
     event_oid: ObjectId | None = None
     if event_id:
         event_oid = _parse_oid(event_id, "event ID")
 
-    # TODO W6: validate file type/size, upload to GCS, truyền image_url thực
     scan = await service.upload_scan(
         db,
         owner_id=owner_id,
-        image_url="",   # placeholder — thay bằng GCS URL sau khi có storage_client
+        image_url=image_url,
         event_id=event_oid,
     )
     return ScanResponse.model_validate(scan)
