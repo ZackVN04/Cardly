@@ -49,3 +49,6 @@ logs/
 # GCP credentials
 *.json
 !pyproject.toml
+
+.venv/
+__pycache__/
