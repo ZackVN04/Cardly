@@ -34,18 +34,36 @@ Collections: users, contacts, events, tags, business_card_scans, enrichment_resu
 - Test file naming: `tests/<module>/test_<feature>.py`
 
 ## Build Order (internship plan)
-W3 done (core, database, main). Next:
-1. activity/service.py
-2. tags/ (router + service)
-3. events/ (router + service)
-4. contacts/ (router + service)
-5. auth/ (router + service)
-6. scans/, enrichment/, cards/, uploads/
+W6 done (W6
+Scans + Enrichment start
+HY
+[Step 8] Implement /scans router + upload pipeline
+POST /(multipart+OCR trigger) · GET/{id}(poll+408) · PATCH/{id}(correct) · DELETE/{id} · rate limit
+step
+AI
+HY
+Implement POST /scans/{id}/confirm — tạo contact
+Validate confirmed_data, create contact (scan_id linked), status='confirmed', activity log
+feature
+HY
+Implement ocr_client.py — Vertex AI / HF integration
+extract_card_data(), parse_ocr_response(), xử lý Vietnamese+English, fallback nếu OCR fail
+AI
+KH
+Implement activity/router.py
+GET / (filter by action/contact_id) · GET /{contactId} — expose activity logs
+feature
+KH
+Implement enrichment/ schemas + service skeleton
+EnrichmentResponse, EnrichmentUpdate, trigger_enrichment() stub, get_result()
+step
+AI
+Scan endpoint nhận ảnh → OCR → extracted_data, confirm tạo contact thành công
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Cardly** (1321 symbols, 2229 relationships, 11 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Cardly** (1497 symbols, 2620 relationships, 16 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
