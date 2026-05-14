@@ -147,6 +147,18 @@ async def confirm_scan(
                 detail=f"Invalid tag ID: {tid}",
             )
 
+    # Verify tất cả tags thuộc về owner — chặn gán tag của người khác
+    if tag_oids:
+        owned = await db["tags"].count_documents({
+            "_id": {"$in": tag_oids},
+            "owner_id": owner_id,
+        })
+        if owned != len(tag_oids):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="One or more tags do not belong to you",
+            )
+
     # Validate event_id format
     event_oid: ObjectId | None = None
     if data.event_id:
