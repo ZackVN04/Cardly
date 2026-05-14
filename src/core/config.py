@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     REFRESH_SECRET: str
     GCP_BUCKET: str = ""
     GCP_CREDENTIALS_JSON: str = ""
+    GCS_PROJECT_ID: str = ""
+    GCS_BUCKET_NAME: str = ""
+    GCS_BASE_URL: str = "https://storage.googleapis.com"
     GEMINI_API_KEY: str = ""
     ENVIRONMENT: str = "dev"
     FRONTEND_URL: str = "http://localhost:3000"
