@@ -8,12 +8,44 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ReturnDocument
 
 from src.activity.service import log_action
+from src.core.config import settings
+from src.enrichment.ai_client import (
+    call_gemini,
+    fetch_facebook_data,
+    fetch_linkedin_data,
+    fetch_website_data,
+    mock_enrich,
+)
 from src.enrichment.exceptions import EnrichmentAlreadyRunning, EnrichmentNotFound
 from src.enrichment.schemas import EnrichmentUpdate
 
 logger = logging.getLogger(__name__)
 
 _RUNNING_STATUSES = {"pending", "processing"}
+
+# All fields that constitute an enrichment result — used for snapshots in activity logs
+_ENRICHMENT_FIELDS = [
+    "brief",
+    "keywords",
+    "highlights",
+    "linkedin_data",
+    "facebook_data",
+    "website_data",
+]
+
+_EMPTY_ENRICHMENT: dict = {
+    "brief": None,
+    "keywords": [],
+    "highlights": [],
+    "linkedin_data": None,
+    "facebook_data": None,
+    "website_data": None,
+}
+
+
+def _snapshot(doc: dict) -> dict:
+    """Extract enrichment fields from a DB document for activity log snapshots."""
+    return {f: doc.get(f) for f in _ENRICHMENT_FIELDS}
 
 
 async def _get_contact_verified(
@@ -43,33 +75,38 @@ async def trigger_enrichment(
     now = datetime.utcnow()
 
     if existing:
+        # Archive previous completed result before wiping — per API spec re-run flow
+        if existing.get("status") == "completed":
+            await log_action(
+                db=db,
+                contact_id=contact_id,
+                owner_id=owner_id,
+                action="enriched",
+                source="enrichment",
+                changed_fields=_ENRICHMENT_FIELDS,
+                previous_values=_snapshot(existing),
+                new_values=_EMPTY_ENRICHMENT.copy(),
+            )
+
         await db["enrichment_results"].update_one(
             {"contact_id": contact_id},
-            {"$set": {
-                "status": "processing",
-                "brief": None,
-                "keywords": [],
-                "highlights": [],
-                "linkedin_data": None,
-                "facebook_data": None,
-                "website_data": None,
-                "source": None,
-                "enriched_at": now,
-            }},
+            {
+                "$set": {
+                    "status": "processing",
+                    "source": None,
+                    "enriched_at": now,
+                    **_EMPTY_ENRICHMENT,
+                }
+            },
         )
         doc = await db["enrichment_results"].find_one({"contact_id": contact_id})
     else:
         doc = {
             "contact_id": contact_id,
             "status": "processing",
-            "brief": None,
-            "keywords": [],
-            "highlights": [],
-            "linkedin_data": None,
-            "facebook_data": None,
-            "website_data": None,
             "source": None,
             "enriched_at": now,
+            **_EMPTY_ENRICHMENT,
         }
         result = await db["enrichment_results"].insert_one(doc)
         doc = await db["enrichment_results"].find_one({"_id": result.inserted_id})
@@ -83,16 +120,27 @@ async def _run_enrichment_async(
     enrichment_id: ObjectId,
     contact: dict,
 ) -> None:
-    from src.enrichment.ai_client import mock_enrich
-    from src.core.config import settings
-
     try:
         if settings.ENVIRONMENT == "test":
             data = mock_enrich(str(contact["_id"]))
         else:
-            # W7: replace with real Gemini pipeline
-            # from src.enrichment.ai_client import fetch_linkedin_data, call_gemini, parse_enrichment_result
-            data = mock_enrich(str(contact["_id"]))
+            linkedin_data, website_data, facebook_data = await asyncio.gather(
+                fetch_linkedin_data(contact.get("linkedin_url") or ""),
+                fetch_website_data(contact.get("website") or ""),
+                fetch_facebook_data(contact.get("facebook_url") or ""),
+            )
+            social_data = {
+                "linkedin_data": linkedin_data,
+                "website_data": website_data,
+                "facebook_data": facebook_data,
+            }
+            gemini_result = await call_gemini(contact, social_data)
+            data = {
+                **gemini_result,
+                "linkedin_data": linkedin_data,
+                "facebook_data": facebook_data,
+                "website_data": website_data,
+            }
 
         await db["enrichment_results"].update_one(
             {"_id": enrichment_id},
@@ -105,7 +153,9 @@ async def _run_enrichment_async(
             owner_id=contact["owner_id"],
             action="enriched",
             source="enrichment",
-            new_values={"brief": data.get("brief"), "keywords": data.get("keywords", [])},
+            changed_fields=_ENRICHMENT_FIELDS,
+            previous_values=_EMPTY_ENRICHMENT.copy(),
+            new_values={f: data.get(f) for f in _ENRICHMENT_FIELDS},
         )
 
     except Exception as exc:
@@ -137,11 +187,14 @@ async def update_manual(
 ) -> dict:
     await _get_contact_verified(db, contact_id, owner_id)
 
-    result = await db["enrichment_results"].find_one({"contact_id": contact_id})
-    if not result:
+    existing = await db["enrichment_results"].find_one({"contact_id": contact_id})
+    if not existing:
         raise EnrichmentNotFound()
 
     fields = data.model_dump(exclude_none=True)
+    changed = list(fields.keys())
+    previous_values = {k: existing.get(k) for k in changed}
+
     fields["source"] = "manual"
 
     updated = await db["enrichment_results"].find_one_and_update(
@@ -156,8 +209,9 @@ async def update_manual(
         owner_id=owner_id,
         action="enriched",
         source="manual",
-        previous_values={"brief": result.get("brief"), "keywords": result.get("keywords")},
-        new_values={k: v for k, v in fields.items() if k != "source"},
+        changed_fields=changed,
+        previous_values=previous_values,
+        new_values={k: fields[k] for k in changed},
     )
 
     return updated
@@ -170,18 +224,20 @@ async def delete_result(
 ) -> None:
     await _get_contact_verified(db, contact_id, owner_id)
 
-    result = await db["enrichment_results"].find_one({"contact_id": contact_id})
-    if not result:
+    existing = await db["enrichment_results"].find_one({"contact_id": contact_id})
+    if not existing:
         raise EnrichmentNotFound()
 
+    # Log full snapshot before deletion — new_values = all null/empty per API spec
     await log_action(
         db=db,
         contact_id=contact_id,
         owner_id=owner_id,
         action="enriched",
         source="user_edit",
-        previous_values={"brief": result.get("brief"), "status": result.get("status")},
-        new_values={"status": "deleted"},
+        changed_fields=_ENRICHMENT_FIELDS,
+        previous_values=_snapshot(existing),
+        new_values=_EMPTY_ENRICHMENT.copy(),
     )
 
     await db["enrichment_results"].delete_one({"contact_id": contact_id})
@@ -199,6 +255,7 @@ async def list_all(
     query: dict = {"contact_id": {"$in": contact_ids}}
     if status_filter:
         query["status"] = status_filter
+
     total_task = db["enrichment_results"].count_documents(query)
     docs_task = (
         db["enrichment_results"]

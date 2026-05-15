@@ -53,7 +53,7 @@ async def scan_user(async_client):
 @pytest.fixture
 def mock_gcs():
     with patch("src.scans.router.upload_to_gcs", AsyncMock(return_value=_FAKE_URL)), \
-         patch("src.scans.ocr_client.run_ocr", AsyncMock(return_value=None)):
+        patch("src.scans.ocr_client.run_ocr", AsyncMock(return_value=None)):
         yield
 
 

@@ -176,8 +176,9 @@ async def test_refresh_with_cookie(async_client, user):
     })
     assert "refreshToken" in r1.cookies
 
-    r2 = await async_client.post(f"{BASE}/refresh",
-        cookies={"refreshToken": r1.cookies["refreshToken"]})
+    async_client.cookies.set("refreshToken", r1.cookies["refreshToken"])
+    r2 = await async_client.post(f"{BASE}/refresh")
+    async_client.cookies.clear()
     assert r2.status_code == 200
     assert "access_token" in r2.json()
 
@@ -188,8 +189,9 @@ async def test_refresh_without_cookie(async_client):
 
 
 async def test_refresh_invalid_token(async_client):
-    r = await async_client.post(f"{BASE}/refresh",
-        cookies={"refreshToken": "garbage.invalid.token"})
+    async_client.cookies.set("refreshToken", "garbage.invalid.token")
+    r = await async_client.post(f"{BASE}/refresh")
+    async_client.cookies.clear()
     assert r.status_code == 403
 
 
