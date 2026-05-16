@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
@@ -47,6 +48,22 @@ app.add_middleware(
 )
 
 register_exception_handlers(app)
+
+
+@app.get("/health", tags=["health"])
+async def health_check() -> JSONResponse:
+    from src.database import get_database
+    try:
+        await get_database().command("ping")
+        db_status = "connected"
+    except Exception:
+        db_status = "unavailable"
+    status = "ok" if db_status == "connected" else "degraded"
+    return JSONResponse(
+        status_code=200 if status == "ok" else 503,
+        content={"status": status, "db": db_status},
+    )
+
 
 PREFIX = "/api/v1"
 app.include_router(auth_router, prefix=PREFIX)
