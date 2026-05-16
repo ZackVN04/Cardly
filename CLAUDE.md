@@ -63,7 +63,7 @@ Scan endpoint nhận ảnh → OCR → extracted_data, confirm tạo contact th�
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Cardly** (1602 symbols, 2816 relationships, 16 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Cardly** (1592 symbols, 2807 relationships, 16 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

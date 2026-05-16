@@ -6,11 +6,23 @@ class CardNotFound(HTTPException):
         super().__init__(status_code=404, detail="Card not found")
 
 
-class CardAlreadyExists(HTTPException):
+class UserAlreadyHasCard(HTTPException):
     def __init__(self):
         super().__init__(status_code=409, detail="User already has a digital card")
 
 
-class SlugConflict(HTTPException):
+class SlugAlreadyTaken(HTTPException):
     def __init__(self):
-        super().__init__(status_code=409, detail="Slug already in use")
+        super().__init__(status_code=409, detail="Slug already taken")
+
+
+class InvalidSlugFormat(HTTPException):
+    def __init__(self):
+        super().__init__(
+            status_code=400,
+            detail=(
+                "Invalid slug format. "
+                "Use 3-30 lowercase letters, digits, or hyphens. "
+                "Cannot start with a hyphen."
+            ),
+        )
