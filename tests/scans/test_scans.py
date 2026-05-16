@@ -1,8 +1,9 @@
 import io
 import uuid
-from datetime import datetime
-from unittest.mock import AsyncMock, patch
+from datetime import datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 import pytest_asyncio
 from bson import ObjectId
@@ -371,3 +372,125 @@ async def test_delete_scan_no_auth(async_client, scan_user):
     scan_id = await _make_completed_scan(ObjectId(scan_user["id"]))
     r = await async_client.delete(f"{BASE}/{scan_id}")
     assert r.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# OCR error handling — timeout, failed status, retry
+# ---------------------------------------------------------------------------
+
+async def test_get_scan_failed_returns_422(async_client, scan_user):
+    """GET /{id} trả 422 khi OCR thất bại — client phải dừng poll."""
+    db = get_database()
+    doc = {
+        "owner_id": ObjectId(scan_user["id"]),
+        "event_id": None,
+        "image_url": _FAKE_URL,
+        "status": "failed",
+        "raw_text": None,
+        "extracted_data": None,
+        "confidence_score": None,
+        "scanned_at": datetime.utcnow(),
+    }
+    result = await db["business_card_scans"].insert_one(doc)
+    scan_id = str(result.inserted_id)
+
+    r = await async_client.get(f"{BASE}/{scan_id}", headers=_hdrs(scan_user["token"]))
+    assert r.status_code == 422
+
+    await db["business_card_scans"].delete_one({"_id": result.inserted_id})
+
+
+async def test_get_scan_processing_timeout_returns_408(async_client, scan_user):
+    """GET /{id} trả 408 khi scan vẫn processing sau hơn 30 giây."""
+    db = get_database()
+    doc = {
+        "owner_id": ObjectId(scan_user["id"]),
+        "event_id": None,
+        "image_url": _FAKE_URL,
+        "status": "processing",
+        "raw_text": None,
+        "extracted_data": None,
+        "confidence_score": None,
+        "scanned_at": datetime.utcnow() - timedelta(seconds=60),
+    }
+    result = await db["business_card_scans"].insert_one(doc)
+    scan_id = str(result.inserted_id)
+
+    r = await async_client.get(f"{BASE}/{scan_id}", headers=_hdrs(scan_user["token"]))
+    assert r.status_code == 408
+
+    await db["business_card_scans"].delete_one({"_id": result.inserted_id})
+
+
+async def test_ocr_retries_on_transient_gemini_error(async_client, scan_user):
+    """run_ocr retry tối đa 3 lần khi Gemini trả 503; scan thành công ở lần 3."""
+    from src.scans import ocr_client
+
+    db = get_database()
+    doc = {
+        "owner_id": ObjectId(scan_user["id"]),
+        "image_url": _FAKE_URL,
+        "status": "processing",
+        "raw_text": None,
+        "extracted_data": None,
+        "confidence_score": None,
+        "scanned_at": datetime.utcnow(),
+    }
+    result = await db["business_card_scans"].insert_one(doc)
+    scan_id = result.inserted_id
+
+    call_count = 0
+
+    async def flaky_gemini(image_bytes: bytes, mime_type: str) -> str:
+        nonlocal call_count
+        call_count += 1
+        if call_count < 3:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 503
+            raise httpx.HTTPStatusError("503", request=MagicMock(), response=mock_resp)
+        return '{"full_name": "Retry User", "position": "CTO", "company": "RetryTest"}'
+
+    with patch("src.scans.ocr_client._fetch_image", AsyncMock(return_value=(b"img", "image/jpeg"))), \
+         patch("src.scans.ocr_client._call_gemini", side_effect=flaky_gemini), \
+         patch("src.scans.ocr_client.asyncio.sleep", AsyncMock()):
+        await ocr_client.run_ocr(db, scan_id, _FAKE_URL)
+
+    scan = await db["business_card_scans"].find_one({"_id": scan_id})
+    assert scan["status"] == "completed"
+    assert call_count == 3
+    assert scan["extracted_data"]["full_name"] == "Retry User"
+
+    await db["business_card_scans"].delete_one({"_id": scan_id})
+
+
+async def test_ocr_marks_failed_when_all_retries_exhausted(async_client, scan_user):
+    """run_ocr mark scan='failed' khi Gemini lỗi cả 3 lần."""
+    from src.scans import ocr_client
+
+    db = get_database()
+    doc = {
+        "owner_id": ObjectId(scan_user["id"]),
+        "image_url": _FAKE_URL,
+        "status": "processing",
+        "raw_text": None,
+        "extracted_data": None,
+        "confidence_score": None,
+        "scanned_at": datetime.utcnow(),
+    }
+    result = await db["business_card_scans"].insert_one(doc)
+    scan_id = result.inserted_id
+
+    async def always_503(image_bytes: bytes, mime_type: str) -> str:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 503
+        raise httpx.HTTPStatusError("503", request=MagicMock(), response=mock_resp)
+
+    with patch("src.scans.ocr_client._fetch_image", AsyncMock(return_value=(b"img", "image/jpeg"))), \
+         patch("src.scans.ocr_client._call_gemini", side_effect=always_503), \
+         patch("src.scans.ocr_client.asyncio.sleep", AsyncMock()):
+        await ocr_client.run_ocr(db, scan_id, _FAKE_URL)
+
+    scan = await db["business_card_scans"].find_one({"_id": scan_id})
+    assert scan["status"] == "failed"
+
+    await db["business_card_scans"].delete_one({"_id": scan_id})

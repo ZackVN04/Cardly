@@ -52,7 +52,7 @@ async def upload_avatar(file: UploadFile, owner_id: str) -> UploadResponse:
     # --- Bước 3: Validate kích thước sau khi đọc ---
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail="File too large. Maximum size is 5MB",
         )
 

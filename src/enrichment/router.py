@@ -33,7 +33,7 @@ def parse_object_id(raw: str) -> ObjectId:
         return ObjectId(raw)
     except Exception:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Invalid contact ID format",
         )
 

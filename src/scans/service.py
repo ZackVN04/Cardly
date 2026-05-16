@@ -10,6 +10,7 @@ from src.activity.service import log_action
 from src.scans.exceptions import (
     CannotEditConfirmedScan,
     NotScanOwner,
+    OCRFailed,
     ScanAlreadyConfirmed,
     ScanNotCompleted,
     ScanNotFound,
@@ -56,6 +57,10 @@ async def get_scan(
         raise ScanNotFound()
     if scan["owner_id"] != owner_id:
         raise NotScanOwner()
+
+    # 422 khi OCR thất bại — client phải dừng poll và thông báo lỗi cho user
+    if scan["status"] == "failed":
+        raise OCRFailed()
 
     # 408 khi scan vẫn processing quá 30 giây — client phải retry sau
     if (

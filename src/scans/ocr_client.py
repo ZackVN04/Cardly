@@ -50,6 +50,14 @@ _ALLOWED_FIELDS = {
     "website", "linkedin_url", "facebook_url", "address", "qr_code",
 }
 
+# Retry config — 3 attempts, exponential backoff
+_MAX_RETRIES = 3
+_RETRY_DELAYS = (1.0, 2.0, 4.0)  # seconds between retries
+_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+# Total budget for one OCR job before marking scan failed
+_OCR_TASK_TIMEOUT = 90.0
+
 
 async def _fetch_image(image_url: str) -> tuple[bytes, str]:
     async with httpx.AsyncClient(timeout=15.0) as client:
@@ -90,8 +98,33 @@ async def _call_gemini(image_bytes: bytes, mime_type: str) -> str:
     return body["candidates"][0]["content"]["parts"][0]["text"]
 
 
+async def _call_gemini_with_retry(image_bytes: bytes, mime_type: str) -> str:
+    """Call Gemini with up to _MAX_RETRIES attempts on transient errors."""
+    last_exc: Exception | None = None
+    for attempt in range(_MAX_RETRIES):
+        try:
+            return await _call_gemini(image_bytes, mime_type)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in _RETRYABLE_STATUS or attempt == _MAX_RETRIES - 1:
+                raise
+            last_exc = exc
+            logger.warning(
+                "Gemini HTTP %s, retry %d/%d in %.0fs",
+                exc.response.status_code, attempt + 1, _MAX_RETRIES, _RETRY_DELAYS[attempt],
+            )
+        except httpx.TimeoutException as exc:
+            if attempt == _MAX_RETRIES - 1:
+                raise
+            last_exc = exc
+            logger.warning(
+                "Gemini timeout, retry %d/%d in %.0fs",
+                attempt + 1, _MAX_RETRIES, _RETRY_DELAYS[attempt],
+            )
+        await asyncio.sleep(_RETRY_DELAYS[attempt])
+    raise last_exc  # type: ignore[misc]
+
+
 def parse_ocr_response(raw_text: str) -> dict:
-    """Parse Gemini OCR text response into a cleaned dict."""
     text = raw_text.strip()
     m = re.search(r"```(?:json)?\s*([\s\S]+?)```", text)
     if m:
@@ -104,13 +137,11 @@ def parse_ocr_response(raw_text: str) -> dict:
 
 
 def _compute_confidence(extracted: dict) -> float:
-    """Score 0.0–1.0 dựa trên số key fields trích xuất được."""
     filled = sum(1 for f in _KEY_FIELDS if extracted.get(f))
     return round(filled / len(_KEY_FIELDS), 2)
 
 
 def mock_extract() -> dict:
-    """Mock extracted data cho ENVIRONMENT='test' — không gọi Gemini thật."""
     return {
         "full_name": "Nguyen Van A",
         "position": "CEO",
@@ -123,9 +154,9 @@ def mock_extract() -> dict:
 
 
 async def extract_card_data(image_url: str) -> tuple[dict, str]:
-    """Fetch image từ URL và chạy Gemini OCR. Returns (extracted_dict, raw_text)."""
+    """Fetch image từ URL và chạy Gemini OCR với retry. Returns (extracted_dict, raw_text)."""
     image_bytes, mime_type = await _fetch_image(image_url)
-    raw_text = await _call_gemini(image_bytes, mime_type)
+    raw_text = await _call_gemini_with_retry(image_bytes, mime_type)
     return parse_ocr_response(raw_text), raw_text
 
 
@@ -134,13 +165,20 @@ async def run_ocr(
     scan_id: ObjectId,
     image_url: str,
 ) -> None:
-    """Background task: chạy OCR và cập nhật scan document."""
+    """Background task: chạy OCR và cập nhật scan document.
+
+    Retry tối đa 3 lần với exponential backoff khi Gemini lỗi tạm thời.
+    Tổng timeout _OCR_TASK_TIMEOUT giây — quá hạn thì mark failed.
+    """
     try:
         if settings.ENVIRONMENT == "test":
             extracted = mock_extract()
             raw_text = "mock_ocr_output"
         else:
-            extracted, raw_text = await extract_card_data(image_url)
+            extracted, raw_text = await asyncio.wait_for(
+                extract_card_data(image_url),
+                timeout=_OCR_TASK_TIMEOUT,
+            )
 
         confidence_score = _compute_confidence(extracted)
 
@@ -152,6 +190,12 @@ async def run_ocr(
                 "extracted_data": extracted,
                 "confidence_score": confidence_score,
             }},
+        )
+    except asyncio.TimeoutError:
+        logger.error("OCR timed out after %ss for scan %s", _OCR_TASK_TIMEOUT, scan_id)
+        await db["business_card_scans"].update_one(
+            {"_id": scan_id},
+            {"$set": {"status": "failed"}},
         )
     except Exception as exc:
         logger.error("OCR failed for scan %s: %s", scan_id, exc)
