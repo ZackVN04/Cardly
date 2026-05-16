@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 _GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models"
-    "/gemini-2.0-flash:generateContent"
+    "/gemini-3.1-flash-lite:generateContent"
 )
 
 _PROMPT = """\
@@ -59,7 +59,23 @@ _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 _OCR_TASK_TIMEOUT = 90.0
 
 
+_GCS_BASE = "https://storage.googleapis.com/"
+_MIME_BY_EXT = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
+
+
 async def _fetch_image(image_url: str) -> tuple[bytes, str]:
+    if image_url.startswith(_GCS_BASE):
+        # Bucket dùng uniform access — download qua GCS SDK (authenticated) thay vì HTTP public
+        from src.uploads.storage_client import _get_client
+        path = image_url[len(_GCS_BASE):]  # "bucket-name/blob/name.jpg"
+        bucket_name, blob_name = path.split("/", 1)
+        loop = asyncio.get_running_loop()
+        gcs = _get_client()
+        blob = gcs.bucket(bucket_name).blob(blob_name)
+        image_bytes = await loop.run_in_executor(None, blob.download_as_bytes)
+        ext = blob_name.rsplit(".", 1)[-1].lower()
+        return image_bytes, _MIME_BY_EXT.get(ext, "image/jpeg")
+
     async with httpx.AsyncClient(timeout=15.0) as client:
         r = await client.get(image_url)
         r.raise_for_status()

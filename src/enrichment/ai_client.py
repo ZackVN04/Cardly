@@ -20,7 +20,7 @@ _BROWSER_HEADERS = {
 
 _GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta"
-    "/models/gemini-2.0-flash:generateContent"
+    "/models/gemini-3.1-flash-lite:generateContent"
 )
 
 

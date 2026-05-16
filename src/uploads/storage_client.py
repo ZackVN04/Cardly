@@ -13,11 +13,13 @@ trong khi thread chờ GCS.
 """
 
 import asyncio
+import json
 import logging
 
 from fastapi import HTTPException, status
 from google.cloud import storage
 from google.cloud.exceptions import GoogleCloudError, NotFound
+from google.oauth2.service_account import Credentials
 
 from src.core.config import settings
 
@@ -36,9 +38,12 @@ def _get_client() -> storage.Client:
     global _gcs_client
 
     if _gcs_client is None:
-        # Đọc credentials từ GOOGLE_APPLICATION_CREDENTIALS env var
-        # storage.Client() tự detect env var này — không hardcode path
-        _gcs_client = storage.Client(project=settings.GCS_PROJECT_ID)
+        creds_info = json.loads(settings.GCP_CREDENTIALS_JSON)
+        credentials = Credentials.from_service_account_info(creds_info)
+        _gcs_client = storage.Client(
+            project=creds_info.get("project_id"),
+            credentials=credentials,
+        )
 
     return _gcs_client
 
@@ -60,21 +65,16 @@ async def upload_to_gcs(
         loop = asyncio.get_running_loop()  # lấy event loop hiện tại của coroutine
 
         client = _get_client()
-        bucket = client.bucket(settings.GCS_BUCKET_NAME)  # không gọi GCS, chỉ tạo reference
+        bucket = client.bucket(settings.GCP_BUCKET)  # không gọi GCS, chỉ tạo reference
         blob = bucket.blob(destination_blob_name)          # tương tự, chỉ là object reference
 
         # upload_from_string là blocking I/O — đẩy vào thread pool
-        # None = dùng default ThreadPoolExecutor của loop
         await loop.run_in_executor(
             None,
             lambda: blob.upload_from_string(file_bytes, content_type=content_type),
         )
 
-        # make_public cũng là HTTP call → executor
-        # Làm blob public để frontend có thể load avatar trực tiếp không qua signed URL
-        await loop.run_in_executor(None, blob.make_public)
-
-        # blob.public_url là property thuần Python, không gọi GCS → lấy trực tiếp
+        # Bucket dùng uniform access — không gọi make_public(), quyền đọc quản lý qua IAM
         return blob.public_url
 
     except GoogleCloudError as exc:
@@ -100,7 +100,7 @@ async def delete_from_gcs(blob_name: str) -> None:
     try:
         loop = asyncio.get_running_loop()
         client = _get_client()
-        bucket = client.bucket(settings.GCS_BUCKET_NAME)
+        bucket = client.bucket(settings.GCP_BUCKET)
         blob = bucket.blob(blob_name)
 
         # blob.delete() là blocking → executor
@@ -127,4 +127,4 @@ def get_public_url(blob_name: str) -> str:
     Dùng khi cần URL nhưng đã biết blob_name (ví dụ: sau khi đọc từ DB).
     Format: https://storage.googleapis.com/{bucket}/{blob_name}
     """
-    return f"{settings.GCS_BASE_URL}/{settings.GCS_BUCKET_NAME}/{blob_name}"
+    return f"{settings.GCS_BASE_URL}/{settings.GCP_BUCKET}/{blob_name}"
