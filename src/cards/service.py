@@ -1,6 +1,6 @@
 import io
-import base64
-import uuid
+import logging
+from datetime import datetime
 
 import qrcode
 from bson import ObjectId
@@ -8,106 +8,147 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
-from src.cards.exceptions import CardAlreadyExists, CardNotFound, SlugConflict
-from src.cards.schemas import CardCreate, CardUpdate
+from src.cards.exceptions import CardNotFound, SlugAlreadyTaken, UserAlreadyHasCard
+from src.cards.schemas import DigitalCardCreate, DigitalCardUpdate
+from src.uploads.storage_client import upload_to_gcs
 
-_PUBLIC_BASE_URL = "https://cardly.app/c"
+logger = logging.getLogger(__name__)
+
+_QR_BASE_URL = "https://cardly.me"
 
 
-def _generate_slug() -> str:
-    return uuid.uuid4().hex[:10]
+# ---------------------------------------------------------------------------
+# generate_qr — build QR PNG in memory and upload to GCS
+# ---------------------------------------------------------------------------
 
-
-def _generate_qr_code_url(slug: str) -> str:
-    url = f"{_PUBLIC_BASE_URL}/{slug}"
+async def generate_qr(slug: str) -> str | None:
+    url = f"{_QR_BASE_URL}/{slug}"
     qr = qrcode.QRCode(version=1, box_size=8, border=2)
     qr.add_data(url)
     qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white")
+
     buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    b64 = base64.b64encode(buf.getvalue()).decode()
-    return f"data:image/png;base64,{b64}"
+    qr.make_image(fill_color="black", back_color="white").save(buf, format="PNG")
+
+    try:
+        return await upload_to_gcs(buf.getvalue(), f"qr_codes/{slug}.png", "image/png")
+    except Exception:
+        logger.warning("QR upload failed for slug=%s — qr_code_url will be None", slug)
+        return None
 
 
-async def get_my_card(db: AsyncIOMotorDatabase, owner_id: ObjectId) -> dict:
-    card = await db["digital_cards"].find_one({"owner_id": owner_id})
+# ---------------------------------------------------------------------------
+# get_my_card
+# ---------------------------------------------------------------------------
+
+async def get_my_card(db: AsyncIOMotorDatabase, user_id: ObjectId) -> dict:
+    card = await db["digital_cards"].find_one({"user_id": user_id})
     if not card:
         raise CardNotFound()
     return card
 
 
+# ---------------------------------------------------------------------------
+# create_card — validate slug uniqueness, generate QR, insert
+# ---------------------------------------------------------------------------
+
 async def create_card(
     db: AsyncIOMotorDatabase,
-    owner_id: ObjectId,
-    data: CardCreate,
+    user_id: ObjectId,
+    data: DigitalCardCreate,
 ) -> dict:
-    if await db["digital_cards"].find_one({"owner_id": owner_id}):
-        raise CardAlreadyExists()
+    if await db["digital_cards"].find_one({"user_id": user_id}):
+        raise UserAlreadyHasCard()
 
-    slug = _generate_slug()
-    qr_code_url = _generate_qr_code_url(slug)
+    now = datetime.utcnow()
+    qr_code_url = await generate_qr(data.slug)
 
     doc = {
-        "owner_id": owner_id,
-        "slug": slug,
-        "qr_code_url": qr_code_url,
-        "view_count": 0,
-        "is_public": data.is_public,
+        "user_id": user_id,
+        "slug": data.slug,
+        "display_name": data.display_name,
         "title": data.title,
-        "bio": data.bio,
         "company": data.company,
-        "title_role": data.title_role,
-        "email": data.email,
-        "phone": data.phone,
-        "website": data.website,
-        "social_links": data.social_links,
+        "avatar_url": data.avatar_url,
+        "bio": data.bio,
+        "highlights": data.highlights,
+        "links": data.links.model_dump() if data.links else None,
+        "qr_code_url": qr_code_url,
+        "is_public": data.is_public,
+        "view_count": 0,
+        "created_at": now,
+        "updated_at": now,
     }
 
     try:
         result = await db["digital_cards"].insert_one(doc)
     except DuplicateKeyError:
-        raise SlugConflict()
+        raise SlugAlreadyTaken()
 
     return await db["digital_cards"].find_one({"_id": result.inserted_id})
 
 
+# ---------------------------------------------------------------------------
+# update_card — regenerate QR if slug changes, catch slug conflicts
+# ---------------------------------------------------------------------------
+
 async def update_card(
     db: AsyncIOMotorDatabase,
-    owner_id: ObjectId,
-    data: CardUpdate,
+    user_id: ObjectId,
+    data: DigitalCardUpdate,
 ) -> dict:
-    card = await db["digital_cards"].find_one({"owner_id": owner_id})
+    card = await db["digital_cards"].find_one({"user_id": user_id})
     if not card:
         raise CardNotFound()
 
-    update_fields = data.model_dump(exclude_none=True)
+    update_fields = data.model_dump(exclude_unset=True)
     if not update_fields:
         return card
 
-    updated = await db["digital_cards"].find_one_and_update(
-        {"owner_id": owner_id},
-        {"$set": update_fields},
-        return_document=ReturnDocument.AFTER,
-    )
+    # Serialize nested CardLinks model → plain dict for MongoDB
+    if "links" in update_fields and data.links is not None:
+        update_fields["links"] = data.links.model_dump()
+
+    # Regenerate QR only when slug actually changes
+    new_slug = update_fields.get("slug")
+    if new_slug and new_slug != card["slug"]:
+        update_fields["qr_code_url"] = await generate_qr(new_slug)
+
+    update_fields["updated_at"] = datetime.utcnow()
+
+    try:
+        updated = await db["digital_cards"].find_one_and_update(
+            {"user_id": user_id},
+            {"$set": update_fields},
+            return_document=ReturnDocument.AFTER,
+        )
+    except DuplicateKeyError:
+        raise SlugAlreadyTaken()
+
     return updated
 
 
-async def delete_card(db: AsyncIOMotorDatabase, owner_id: ObjectId) -> None:
-    card = await db["digital_cards"].find_one({"owner_id": owner_id})
+# ---------------------------------------------------------------------------
+# delete_card — slug freed automatically (unique index released on delete)
+# ---------------------------------------------------------------------------
+
+async def delete_card(db: AsyncIOMotorDatabase, user_id: ObjectId) -> None:
+    card = await db["digital_cards"].find_one({"user_id": user_id})
     if not card:
         raise CardNotFound()
-    await db["digital_cards"].delete_one({"owner_id": owner_id})
+    await db["digital_cards"].delete_one({"_id": card["_id"]})
 
+
+# ---------------------------------------------------------------------------
+# get_public_card — 404 if not found or is_public=False, atomic view_count++
+# ---------------------------------------------------------------------------
 
 async def get_public_card(db: AsyncIOMotorDatabase, slug: str) -> dict:
-    card = await db["digital_cards"].find_one({"slug": slug})
-    if not card or not card.get("is_public", False):
-        raise CardNotFound()
-
-    await db["digital_cards"].update_one(
-        {"slug": slug},
+    card = await db["digital_cards"].find_one_and_update(
+        {"slug": slug, "is_public": True},
         {"$inc": {"view_count": 1}},
+        return_document=ReturnDocument.AFTER,
     )
-    card["view_count"] = card.get("view_count", 0) + 1
+    if not card:
+        raise CardNotFound()
     return card

@@ -1,53 +1,77 @@
-from pydantic import BaseModel, Field, field_validator
+from datetime import datetime
 
 from bson import ObjectId
+from pydantic import BaseModel, Field, field_validator
+
+SLUG_PATTERN = r"^[a-z0-9][a-z0-9-]{2,29}$"
 
 
-class CardCreate(BaseModel):
-    title: str | None = None
-    bio: str | None = None
-    company: str | None = None
-    title_role: str | None = None
-    email: str | None = None
+class CardLinks(BaseModel):
     phone: str | None = None
+    email: str | None = None
+    whatsapp: str | None = None
+    zalo: str | None = None
+    linkedin: str | None = None
     website: str | None = None
-    social_links: dict | None = None
+
+
+class DigitalCardCreate(BaseModel):
+    slug: str = Field(..., pattern=SLUG_PATTERN)
+    display_name: str
+    title: str | None = None
+    company: str | None = None
+    avatar_url: str | None = None
+    bio: str | None = None
+    highlights: list[str] = []
+    links: CardLinks | None = None
     is_public: bool = True
 
 
-class CardUpdate(BaseModel):
+class DigitalCardUpdate(BaseModel):
+    slug: str | None = Field(None, pattern=SLUG_PATTERN)
+    display_name: str | None = None
     title: str | None = None
-    bio: str | None = None
     company: str | None = None
-    title_role: str | None = None
-    email: str | None = None
-    phone: str | None = None
-    website: str | None = None
-    social_links: dict | None = None
+    avatar_url: str | None = None
+    bio: str | None = None
+    highlights: list[str] | None = None
+    links: CardLinks | None = None
     is_public: bool | None = None
 
 
-class CardResponse(BaseModel):
+class DigitalCardResponse(BaseModel):
     id: str = Field(validation_alias="_id")
-    owner_id: str
+    user_id: str
     slug: str
+    display_name: str
     title: str | None = None
-    bio: str | None = None
     company: str | None = None
-    title_role: str | None = None
-    email: str | None = None
-    phone: str | None = None
-    website: str | None = None
-    social_links: dict | None = None
-    is_public: bool
+    avatar_url: str | None = None
+    bio: str | None = None
+    highlights: list[str] = []
+    links: dict | None = None
     qr_code_url: str | None = None
+    is_public: bool
     view_count: int = 0
+    created_at: datetime
+    updated_at: datetime
 
-    model_config = {"populate_by_name": True, "from_attributes": True}
+    model_config = {"populate_by_name": True}
 
-    @field_validator("id", "owner_id", mode="before")
+    @field_validator("id", "user_id", mode="before")
     @classmethod
     def coerce_objectid(cls, v):
         if isinstance(v, ObjectId):
             return str(v)
         return v
+
+
+class PublicCardResponse(BaseModel):
+    display_name: str
+    title: str | None = None
+    company: str | None = None
+    avatar_url: str | None = None
+    bio: str | None = None
+    highlights: list[str] = []
+    links: dict | None = None
+    qr_code_url: str | None = None
