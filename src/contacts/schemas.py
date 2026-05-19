@@ -4,13 +4,14 @@ from bson import ObjectId
 from pydantic import BaseModel, Field, field_validator
 
 from src.core.pagination import PaginatedResponse
+from src.enrichment.schemas import EnrichmentResponse
 
 
 class ContactCreate(BaseModel):
     full_name: str = Field(..., min_length=1, max_length=100)
     position: str | None = None
     company: str | None = None
-    phone: str | None = None
+    phone: list[str] | None = None
     email: str | None = None
     website: str | None = None
     linkedin_url: str | None = None
@@ -26,7 +27,7 @@ class ContactUpdate(BaseModel):
     full_name: str | None = Field(default=None, min_length=1, max_length=100)
     position: str | None = None
     company: str | None = None
-    phone: str | None = None
+    phone: list[str] | None = None
     email: str | None = None
     website: str | None = None
     linkedin_url: str | None = None
@@ -49,7 +50,7 @@ class ContactResponse(BaseModel):
     full_name: str
     position: str | None = None
     company: str | None = None
-    phone: str | None = None
+    phone: list[str] | None = None
     email: str | None = None
     website: str | None = None
     linkedin_url: str | None = None
@@ -84,6 +85,10 @@ class ContactResponse(BaseModel):
         if isinstance(v, list):
             return [str(i) if isinstance(i, ObjectId) else i for i in v]
         return v
+
+
+class ContactWithEnrichment(ContactResponse):
+    enrichment_result: EnrichmentResponse | None = None
 
 
 ContactListResponse = PaginatedResponse[ContactResponse]

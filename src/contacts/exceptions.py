@@ -13,7 +13,7 @@ class NotContactOwner(HTTPException):
 
 class TagAlreadyAdded(HTTPException):
     def __init__(self):
-        super().__init__(status_code=409, detail="Tag already added to contact")
+        super().__init__(status_code=400, detail="Tag already added to contact")
 
 
 class TagNotOnContact(HTTPException):

@@ -1,3 +1,4 @@
+import asyncio
 import pathlib
 import uuid
 from datetime import datetime
@@ -67,43 +68,55 @@ async def list_scans(
 @limiter.limit("10/minute")
 async def upload_scan(
     request: Request,
-    file: UploadFile = File(...),
+    file: UploadFile = File(..., description="Ảnh mặt trước (bắt buộc)"),
+    file2: UploadFile | None = File(default=None, description="Ảnh mặt sau (tuỳ chọn)"),
     event_id: str | None = Query(default=None),
     current_user: dict = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """
-    Upload ảnh danh thiếp → OCR async → trả 202 ngay.
-    Client poll GET /{id} mỗi 2s đến khi status='completed'.
+    Upload 1 hoặc 2 ảnh của cùng 1 người → OCR → trả 202 ngay với 1 scan duy nhất.
+    file2 tuỳ chọn: mặt sau card — OCR cả 2 rồi merge extracted_data.
     """
-    if file.content_type not in ALLOWED_MIME_TYPES:
-        raise UnsupportedFileType()
-
-    content = await file.read()
-
-    if len(content) > MAX_FILE_SIZE:
-        raise FileTooLarge()
-
-    ext = pathlib.Path(file.filename or "").suffix.lower()
-    if ext not in ALLOWED_EXTENSIONS:
-        raise UnsupportedFileType()
-
     owner_id = ObjectId(current_user["_id"])
-    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-    unique_id = uuid.uuid4().hex[:8]
-    blob_name = f"scans/{owner_id}_{timestamp}_{unique_id}{ext}"
-    image_url = await upload_to_gcs(content, blob_name, file.content_type)
-
     event_oid: ObjectId | None = None
     if event_id:
         event_oid = _parse_oid(event_id, "event ID")
 
-    scan = await service.upload_scan(
-        db,
-        owner_id=owner_id,
-        image_url=image_url,
-        event_id=event_oid,
-    )
+    async def _upload_file(f: UploadFile) -> tuple[str, str]:
+        if f.content_type not in ALLOWED_MIME_TYPES:
+            raise UnsupportedFileType()
+        content = await f.read()
+        if len(content) > MAX_FILE_SIZE:
+            raise FileTooLarge()
+        ext = pathlib.Path(f.filename or "").suffix.lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            raise UnsupportedFileType()
+        timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+        unique_id = uuid.uuid4().hex[:8]
+        blob_name = f"scans/{owner_id}_{timestamp}_{unique_id}{ext}"
+        image_url = await upload_to_gcs(content, blob_name, f.content_type)
+        return image_url, blob_name
+
+    if file2 is None:
+        image_url, blob_name = await _upload_file(file)
+        scan = await service.upload_scan(
+            db, owner_id=owner_id,
+            image_url=image_url,
+            image_blob_name=blob_name,
+            event_id=event_oid,
+        )
+    else:
+        (url1, blob1), (url2, blob2) = await asyncio.gather(
+            _upload_file(file), _upload_file(file2),
+        )
+        scan = await service.upload_scan_multi_page(
+            db, owner_id=owner_id,
+            image_urls=[url1, url2],
+            image_blob_names=[blob1, blob2],
+            event_id=event_oid,
+        )
+
     return ScanResponse.model_validate(scan)
 
 

@@ -26,7 +26,7 @@ Return ONLY a valid JSON object with exactly these keys (use null for any missin
   "full_name": string or null,
   "position": string or null,
   "company": string or null,
-  "phone": string or null,
+  "phone": array of strings or null,
   "email": string or null,
   "website": string or null,
   "linkedin_url": string or null,
@@ -38,7 +38,7 @@ Return ONLY a valid JSON object with exactly these keys (use null for any missin
 Rules:
 - full_name: full person name as printed (keep Vietnamese diacritics)
 - position: job title / chức danh
-- phone: preserve original format including country code
+- phone: array of all phone numbers found, preserve original format; null if none
 - qr_code: decoded URL/text if a QR code is visible on the card, otherwise null
 - Return ONLY the JSON object — no markdown fences, no explanation.\
 """
@@ -133,11 +133,28 @@ def parse_ocr_response(raw_text: str) -> dict:
         data = json.loads(text)
     except json.JSONDecodeError:
         return {}
-    return {k: v for k, v in data.items() if k in _ALLOWED_FIELDS and v is not None}
+    result = {}
+    for k, v in data.items():
+        if k not in _ALLOWED_FIELDS or v is None:
+            continue
+        if k == "phone":
+            if isinstance(v, list):
+                phones = [str(p) for p in v if p]
+                result[k] = phones if phones else None
+            elif isinstance(v, str) and v.strip():
+                result[k] = [v.strip()]
+        else:
+            result[k] = v
+    return {k: v for k, v in result.items() if v is not None}
 
 
 def _compute_confidence(extracted: dict) -> float:
-    filled = sum(1 for f in _KEY_FIELDS if extracted.get(f))
+    def _has_value(f: str) -> bool:
+        v = extracted.get(f)
+        if isinstance(v, list):
+            return bool(v)
+        return bool(v)
+    filled = sum(1 for f in _KEY_FIELDS if _has_value(f))
     return round(filled / len(_KEY_FIELDS), 2)
 
 
@@ -146,7 +163,7 @@ def mock_extract() -> dict:
         "full_name": "Nguyen Van A",
         "position": "CEO",
         "company": "TechCorp",
-        "phone": "0901234567",
+        "phone": ["0901234567"],
         "email": "a@techcorp.com",
         "website": "techcorp.com",
         "address": "123 Nguyen Hue, Ho Chi Minh City",
@@ -158,6 +175,58 @@ async def extract_card_data(image_url: str) -> tuple[dict, str]:
     image_bytes, mime_type = await _fetch_image(image_url)
     raw_text = await _call_gemini_with_retry(image_bytes, mime_type)
     return parse_ocr_response(raw_text), raw_text
+
+
+def _merge_extracted(results: list[tuple[dict, str]]) -> tuple[dict, str]:
+    """Merge nhiều kết quả OCR thành 1 — ưu tiên field non-null từ ảnh trước."""
+    merged: dict = {}
+    raw_texts: list[str] = []
+    for extracted, raw_text in results:
+        raw_texts.append(raw_text)
+        for field in _ALLOWED_FIELDS:
+            if field not in merged and extracted.get(field):
+                merged[field] = extracted[field]
+    return merged, "\n---\n".join(raw_texts)
+
+
+async def run_ocr_multi_page(
+    db: AsyncIOMotorDatabase,
+    scan_id: ObjectId,
+    image_urls: list[str],
+) -> None:
+    """Background task: OCR nhiều ảnh song song → merge → cập nhật 1 scan document."""
+    try:
+        if settings.ENVIRONMENT == "test":
+            extracted = mock_extract()
+            raw_text = "mock_ocr_output"
+        else:
+            results = await asyncio.wait_for(
+                asyncio.gather(*[extract_card_data(url) for url in image_urls]),
+                timeout=_OCR_TASK_TIMEOUT,
+            )
+            extracted, raw_text = _merge_extracted(list(results))
+
+        confidence_score = _compute_confidence(extracted)
+
+        await db["business_card_scans"].update_one(
+            {"_id": scan_id},
+            {"$set": {
+                "status": "completed",
+                "raw_text": raw_text,
+                "extracted_data": extracted,
+                "confidence_score": confidence_score,
+            }},
+        )
+    except asyncio.TimeoutError:
+        logger.error("OCR multi-page timed out after %ss for scan %s", _OCR_TASK_TIMEOUT, scan_id)
+        await db["business_card_scans"].update_one(
+            {"_id": scan_id}, {"$set": {"status": "failed"}},
+        )
+    except Exception as exc:
+        logger.error("OCR multi-page failed for scan %s: %s", scan_id, exc)
+        await db["business_card_scans"].update_one(
+            {"_id": scan_id}, {"$set": {"status": "failed"}},
+        )
 
 
 async def run_ocr(

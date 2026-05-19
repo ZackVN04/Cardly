@@ -13,6 +13,7 @@ from bson import ObjectId
 from fastapi import HTTPException, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 
 from src.auth.constants import ACCESS_TOKEN_EXPIRE, REFRESH_TOKEN_EXPIRE, RESET_TOKEN_EXPIRE
 from src.auth.exceptions import InvalidCredentials, ResetTokenExpired, TokenInvalid
@@ -56,7 +57,10 @@ async def register(db: AsyncIOMotorDatabase, data: UserCreate) -> dict:
         "updated_at": now,
     }
 
-    result = await db["users"].insert_one(doc)
+    try:
+        result = await db["users"].insert_one(doc)
+    except DuplicateKeyError:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username or email already registered")
     return await db["users"].find_one({"_id": result.inserted_id})
 
 
@@ -124,6 +128,7 @@ async def change_password(
             "updated_at": datetime.utcnow(),
         }},
     )
+    logger.info("user_action action=updated user_id=%s changed_fields=['hashed_password']", user_id)
 
 
 async def forgot_password(db: AsyncIOMotorDatabase, email: str) -> None:
@@ -166,6 +171,7 @@ async def reset_password(db: AsyncIOMotorDatabase, data: ResetPasswordReq) -> No
             "updated_at": datetime.utcnow(),
         }},
     )
+    logger.info("user_action action=updated email=%s changed_fields=['hashed_password']", email)
 
 
 async def delete_account(

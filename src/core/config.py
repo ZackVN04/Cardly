@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     GCS_BASE_URL: str = "https://storage.googleapis.com"
     GEMINI_API_KEY: str = ""
     ENVIRONMENT: str = "dev"
+    COOKIE_SECURE: bool = False
     FRONTEND_URL: str = "http://localhost:3000"
 
     model_config = {"env_file": ".env", "case_sensitive": False, "extra": "ignore"}

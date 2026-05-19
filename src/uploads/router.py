@@ -28,7 +28,7 @@ router = APIRouter(prefix="/uploads", tags=["uploads"])
 @router.post(
     "/avatar",
     response_model=UploadResponse,
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_200_OK,
     summary="Upload avatar image",
     description=(
         "Upload avatar image. Replaces existing avatar. "

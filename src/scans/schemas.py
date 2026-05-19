@@ -16,7 +16,7 @@ class ScanExtractedData(BaseModel):
     full_name: str | None = None
     position: str | None = None
     company: str | None = None
-    phone: str | None = None
+    phone: list[str] | None = None
     email: str | None = None
     website: str | None = None
     linkedin_url: str | None = None
@@ -34,7 +34,7 @@ class PatchExtractedData(BaseModel):
     full_name: str | None = None
     position: str | None = None
     company: str | None = None
-    phone: str | None = None
+    phone: list[str] | None = None
     email: str | None = None
     website: str | None = None
     linkedin_url: str | None = None
@@ -61,7 +61,7 @@ class ConfirmedData(BaseModel):
     full_name: str = Field(..., min_length=1, max_length=100)
     position: str | None = None
     company: str | None = None
-    phone: str | None = None
+    phone: list[str] | None = None
     email: str | None = None
     website: str | None = None
     linkedin_url: str | None = None
@@ -76,10 +76,21 @@ class ConfirmedData(BaseModel):
 # ---------------------------------------------------------------------------
 
 class ConfirmScanRequest(BaseModel):
-    confirmed_data: ConfirmedData
+    confirmed_data: ConfirmedData | None = None
     notes: str | None = None
     tag_ids: list[str] = []
     event_id: str | None = None
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "confirmed_data": None,
+                "notes": None,
+                "tag_ids": [],
+                "event_id": None
+            }
+        }
+    }
 
 
 # ---------------------------------------------------------------------------

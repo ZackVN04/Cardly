@@ -26,13 +26,15 @@ async def create(
     owner_id: ObjectId,
     data: EventCreate,
 ) -> dict:
+    now = datetime.utcnow()
     doc = {
         "owner_id": owner_id,
         "name": data.name,
         "location": data.location,
         "event_date": data.event_date,
         "description": data.description,
-        "created_at": datetime.utcnow(),   # timestamp server-side, không tin client
+        "created_at": now,
+        "updated_at": now,
     }
 
     result = await db["events"].insert_one(doc)
@@ -165,8 +167,8 @@ async def update(
     # Bước 5: update và lấy doc mới trong 1 atomic operation
     updated = await db["events"].find_one_and_update(
         {"_id": event_id},
-        {"$set": update_fields},
-        return_document=ReturnDocument.AFTER,   # trả về doc SAU khi update
+        {"$set": {**update_fields, "updated_at": datetime.utcnow()}},
+        return_document=ReturnDocument.AFTER,
     )
 
     return updated
@@ -204,7 +206,7 @@ async def delete_with_cascade(
         db["events"].delete_one({"_id": event_id}),
         db["contacts"].update_many(
             {"event_id": event_id},
-            {"$set": {"event_id": None}},
+            {"$set": {"event_id": None, "updated_at": datetime.utcnow()}},
         ),
     )
 

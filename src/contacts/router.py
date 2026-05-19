@@ -17,7 +17,9 @@ from src.contacts.schemas import (
     ContactListResponse,
     ContactResponse,
     ContactUpdate,
+    ContactWithEnrichment,
 )
+from src.enrichment.schemas import EnrichmentResponse
 from src.core.pagination import PaginatedResponse
 from src.database import get_database
 
@@ -82,18 +84,30 @@ async def create_contact(
 
 # ---------------------------------------------------------------------------
 # GET /{contact_id} — lấy chi tiết một contact
+# ?include=enrichment để embed enrichment_result vào response
 # ---------------------------------------------------------------------------
 
-@router.get("/{contact_id}", response_model=ContactResponse)
+@router.get("/{contact_id}", response_model=ContactWithEnrichment)
 async def get_contact(
     contact_id: str,
+    include: str | None = Query(default=None, description="Dùng 'enrichment' để embed enrichment_result"),
     current_user: dict = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_database),
 ):
     oid = parse_object_id(contact_id, "contact ID")
     owner_id = ObjectId(current_user["_id"])
     contact = await service.get_contact(db, oid, owner_id)
-    return ContactResponse.model_validate(contact)
+
+    enrichment_result = None
+    if include == "enrichment":
+        raw = await db["enrichment_results"].find_one({"contact_id": oid})
+        if raw:
+            enrichment_result = EnrichmentResponse.model_validate(raw)
+
+    return ContactWithEnrichment(
+        **ContactResponse.model_validate(contact).model_dump(),
+        enrichment_result=enrichment_result,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +165,7 @@ async def add_tag(
 # DELETE /{contact_id}/tags/{tag_id} — gỡ tag khỏi contact
 # ---------------------------------------------------------------------------
 
-@router.delete("/{contact_id}/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{contact_id}/tags/{tag_id}", response_model=ContactResponse)
 async def remove_tag(
     contact_id: str,
     tag_id: str,
@@ -162,4 +176,5 @@ async def remove_tag(
     tag_oid = parse_object_id(tag_id, "tag ID")
     owner_id = ObjectId(current_user["_id"])
 
-    await service.remove_tag(db, contact_oid, owner_id, tag_oid)
+    updated = await service.remove_tag(db, contact_oid, owner_id, tag_oid)
+    return ContactResponse.model_validate(updated)

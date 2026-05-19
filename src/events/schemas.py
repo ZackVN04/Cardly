@@ -15,10 +15,10 @@ from pydantic import BaseModel, Field, field_validator
 # ---------------------------------------------------------------------------
 
 class EventCreate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=100)  # tên bắt buộc, giới hạn độ dài
-    location: str | None = None                           # địa điểm tùy chọn
-    event_date: datetime                                  # bắt buộc — dùng để sort và hiển thị
-    description: str | None = None                        # mô tả tùy chọn
+    name: str = Field(..., min_length=1, max_length=100)
+    location: str | None = None
+    event_date: datetime | None = None
+    description: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -41,9 +41,10 @@ class EventResponse(BaseModel):
     owner_id: str
     name: str
     location: str | None
-    event_date: datetime
+    event_date: datetime | None
     description: str | None
     created_at: datetime
+    updated_at: datetime | None = None
 
     model_config = {
         "populate_by_name": True,   # accept cả "id" và "_id" khi khởi tạo

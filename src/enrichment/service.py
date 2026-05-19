@@ -173,10 +173,25 @@ async def get_result(
 ) -> dict:
     await _get_contact_verified(db, contact_id, owner_id)
 
-    result = await db["enrichment_results"].find_one({"contact_id": contact_id})
-    if not result:
+    pipeline = [
+        {"$match": {"contact_id": contact_id}},
+        {"$lookup": {
+            "from": "contacts",
+            "localField": "contact_id",
+            "foreignField": "_id",
+            "as": "contact",
+            "pipeline": [{"$project": {"full_name": 1, "company": 1}}],
+        }},
+        {"$addFields": {
+            "contact_name": {"$arrayElemAt": ["$contact.full_name", 0]},
+            "contact_company": {"$arrayElemAt": ["$contact.company", 0]},
+        }},
+        {"$project": {"contact": 0}},
+    ]
+    docs = await db["enrichment_results"].aggregate(pipeline).to_list(length=1)
+    if not docs:
         raise EnrichmentNotFound()
-    return result
+    return docs[0]
 
 
 async def update_manual(
@@ -250,21 +265,40 @@ async def list_all(
     limit: int = 20,
     status_filter: str | None = None,
 ) -> tuple[list[dict], int]:
-    contact_ids = await db["contacts"].distinct("_id", {"owner_id": owner_id})
-
-    query: dict = {"contact_id": {"$in": contact_ids}}
+    extra_match: dict = {}
     if status_filter:
-        query["status"] = status_filter
+        extra_match["status"] = status_filter
 
-    total_task = db["enrichment_results"].count_documents(query)
-    docs_task = (
-        db["enrichment_results"]
-        .find(query)
-        .sort("enriched_at", -1)
-        .skip(skip)
-        .limit(limit)
-        .to_list(length=limit)
+    pipeline = [
+        # $lookup contacts để lọc theo owner và lấy full_name + company
+        {"$lookup": {
+            "from": "contacts",
+            "localField": "contact_id",
+            "foreignField": "_id",
+            "as": "contact",
+            "pipeline": [
+                {"$match": {"owner_id": owner_id}},
+                {"$project": {"full_name": 1, "company": 1}},
+            ],
+        }},
+        # chỉ giữ enrichment_results có contact thuộc owner này
+        {"$match": {"contact": {"$ne": []}, **extra_match}},
+        # flatten contact_name + contact_company lên document gốc
+        {"$addFields": {
+            "contact_name": {"$arrayElemAt": ["$contact.full_name", 0]},
+            "contact_company": {"$arrayElemAt": ["$contact.company", 0]},
+        }},
+        {"$project": {"contact": 0}},
+        {"$sort": {"enriched_at": -1}},
+    ]
+
+    count_pipeline = [*pipeline, {"$count": "n"}]
+    data_pipeline = [*pipeline, {"$skip": skip}, {"$limit": limit}]
+
+    count_result, docs = await asyncio.gather(
+        db["enrichment_results"].aggregate(count_pipeline).to_list(length=1),
+        db["enrichment_results"].aggregate(data_pipeline).to_list(length=limit),
     )
 
-    total, docs = await asyncio.gather(total_task, docs_task)
+    total = count_result[0]["n"] if count_result else 0
     return docs, total

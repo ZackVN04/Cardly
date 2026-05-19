@@ -21,6 +21,7 @@ from src.auth.schemas import (
     UserResponse,
     UserUpdate,
 )
+from src.core.config import settings
 from src.database import get_database
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -35,7 +36,7 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
         value=token,
         httponly=True,       # JS không đọc được — bảo vệ XSS
         samesite="lax",
-        secure=False,        # True khi deploy HTTPS
+        secure=settings.COOKIE_SECURE,
         max_age=_COOKIE_MAX_AGE,
     )
 

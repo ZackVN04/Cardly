@@ -31,11 +31,11 @@ async def get_me(
     return _to_public(user)
 
 
-@router.get("/search", response_model=UserSearchList)
+@router.get("", response_model=UserSearchList)
 async def search_users(
     q: str = Query(...),
     page: int = Query(default=1, ge=1),
-    limit: int = Query(default=20, ge=1, le=100),
+    limit: int = Query(default=20, ge=1, le=50),
     current_user: dict = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_database),
 ):

@@ -7,6 +7,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ReturnDocument
 
 from src.activity.service import log_action
+from src.tags.service import generate_auto_tags
 from src.scans.exceptions import (
     CannotEditConfirmedScan,
     NotScanOwner,
@@ -120,9 +121,13 @@ async def delete_scan(
     if scan["owner_id"] != owner_id:
         raise NotScanOwner()
 
-    # Chỉ xóa scan record — KHÔNG xóa contact đã tạo, KHÔNG xóa GCS image
-    # GCS cleanup do scheduled job xử lý (Phase 2)
     await db["business_card_scans"].delete_one({"_id": scan_id})
+
+    blob_name = scan.get("image_blob_name")
+    if blob_name:
+        import asyncio as _asyncio
+        from src.uploads.storage_client import delete_from_gcs
+        _asyncio.create_task(delete_from_gcs(blob_name))
 
 
 async def confirm_scan(
@@ -140,6 +145,28 @@ async def confirm_scan(
         raise ScanAlreadyConfirmed()
     if scan["status"] != "completed":
         raise ScanNotCompleted()
+
+    # Nếu không truyền confirmed_data → tự dùng extracted_data từ scan
+    if data.confirmed_data is None:
+        ed = scan.get("extracted_data") or {}
+        full_name = ed.get("full_name") or ""
+        if not full_name:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="full_name is required — scan extracted_data has no full_name",
+            )
+        from src.scans.schemas import ConfirmedData
+        data = data.model_copy(update={"confirmed_data": ConfirmedData(
+            full_name=full_name,
+            position=ed.get("position"),
+            company=ed.get("company"),
+            phone=ed.get("phone"),
+            email=ed.get("email"),
+            website=ed.get("website"),
+            linkedin_url=ed.get("linkedin_url"),
+            facebook_url=ed.get("facebook_url"),
+            address=ed.get("address"),
+        )})
 
     # Validate tag_ids format
     tag_oids: list[ObjectId] = []
@@ -221,19 +248,56 @@ async def confirm_scan(
         },
     )
 
+    auto_tag_ids = await generate_auto_tags(db, owner_id, contact)
+    if auto_tag_ids:
+        await db["contacts"].update_one(
+            {"_id": contact_result.inserted_id},
+            {"$addToSet": {"tag_ids": {"$each": auto_tag_ids}}},
+        )
+        contact = await db["contacts"].find_one({"_id": contact_result.inserted_id})
+
     return contact
+
+
+async def upload_scan_multi_page(
+    db: AsyncIOMotorDatabase,
+    owner_id: ObjectId,
+    image_urls: list[str],
+    image_blob_names: list[str] | None = None,
+    event_id: ObjectId | None = None,
+) -> dict:
+    doc = {
+        "owner_id": owner_id,
+        "event_id": event_id,
+        "image_url": image_urls[0],
+        "image_blob_name": (image_blob_names or [None])[0],
+        "status": "processing",
+        "raw_text": None,
+        "extracted_data": None,
+        "confidence_score": None,
+        "scanned_at": datetime.utcnow(),
+    }
+
+    result = await db["business_card_scans"].insert_one(doc)
+
+    from src.scans.ocr_client import run_ocr_multi_page
+    asyncio.create_task(run_ocr_multi_page(db, result.inserted_id, image_urls))
+
+    return await db["business_card_scans"].find_one({"_id": result.inserted_id})
 
 
 async def upload_scan(
     db: AsyncIOMotorDatabase,
     owner_id: ObjectId,
     image_url: str,
+    image_blob_name: str | None = None,
     event_id: ObjectId | None = None,
 ) -> dict:
     doc = {
         "owner_id": owner_id,
         "event_id": event_id,
         "image_url": image_url,
+        "image_blob_name": image_blob_name,
         "status": "processing",
         "raw_text": None,
         "extracted_data": None,

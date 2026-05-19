@@ -19,6 +19,8 @@ class EnrichmentResponse(BaseModel):
     website_data: dict | None = None
     source: Literal["gemini", "vertex_ai", "manual"] | None = None
     enriched_at: datetime | None = None
+    contact_name: str | None = None      # populated by list_all via $lookup
+    contact_company: str | None = None   # populated by list_all via $lookup
 
     model_config = {"populate_by_name": True, "from_attributes": True}
 

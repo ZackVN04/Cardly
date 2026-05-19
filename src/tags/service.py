@@ -164,6 +164,67 @@ async def update(
 # delete_with_bulk_pull — xóa tag và gỡ khỏi tất cả contacts
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# ensure_auto_tag — get-or-create a tag with source='auto'
+# ---------------------------------------------------------------------------
+
+async def ensure_auto_tag(
+    db: AsyncIOMotorDatabase,
+    owner_id: ObjectId,
+    name: str,
+    color: str = "#7F77DD",
+) -> ObjectId:
+    pattern = re.compile(f"^{re.escape(name)}$", re.IGNORECASE)
+    existing = await db["tags"].find_one({
+        "owner_id": owner_id,
+        "name": {"$regex": pattern},
+    })
+    if existing:
+        return existing["_id"]
+
+    result = await db["tags"].insert_one({
+        "owner_id": owner_id,
+        "name": name,
+        "color": color,
+        "source": "auto",
+        "created_at": datetime.utcnow(),
+    })
+    return result.inserted_id
+
+
+# ---------------------------------------------------------------------------
+# generate_auto_tags — sinh tự động 3 loại tag: date · event · location
+# ---------------------------------------------------------------------------
+
+async def generate_auto_tags(
+    db: AsyncIOMotorDatabase,
+    owner_id: ObjectId,
+    contact: dict,
+) -> list[ObjectId]:
+    tag_ids: list[ObjectId] = []
+
+    # Date tag: "May 2026"
+    created_at = contact.get("created_at") or datetime.utcnow()
+    tag_ids.append(await ensure_auto_tag(db, owner_id, created_at.strftime("%B %Y"), "#60A0F0"))
+
+    # Event tag: tên của event được gán cho contact
+    event_id = contact.get("event_id")
+    if event_id:
+        event = await db["events"].find_one({"_id": event_id})
+        if event:
+            tag_ids.append(await ensure_auto_tag(db, owner_id, event["name"], "#3DD68C"))
+
+    # Location tag: phần cuối của address sau dấu phẩy (e.g. "HCMC", "Ha Noi")
+    address = (contact.get("address") or "").strip()
+    if address:
+        parts = [p.strip() for p in address.split(",") if p.strip()]
+        location = parts[-1] if parts else ""
+        if 2 <= len(location) <= 50:
+            tag_ids.append(await ensure_auto_tag(db, owner_id, location, "#F5A623"))
+
+    return tag_ids
+
+
 async def delete_with_bulk_pull(
     db: AsyncIOMotorDatabase,
     tag_id: ObjectId,

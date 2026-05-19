@@ -10,7 +10,7 @@ from pymongo.errors import DuplicateKeyError
 
 from src.cards.exceptions import CardNotFound, SlugAlreadyTaken, UserAlreadyHasCard
 from src.cards.schemas import DigitalCardCreate, DigitalCardUpdate
-from src.uploads.storage_client import upload_to_gcs
+from src.uploads.storage_client import delete_from_gcs, upload_to_gcs
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +112,10 @@ async def update_card(
     # Regenerate QR only when slug actually changes
     new_slug = update_fields.get("slug")
     if new_slug and new_slug != card["slug"]:
+        old_qr_blob = f"qr_codes/{card['slug']}.png"
         update_fields["qr_code_url"] = await generate_qr(new_slug)
+        import asyncio as _asyncio
+        _asyncio.create_task(delete_from_gcs(old_qr_blob))
 
     update_fields["updated_at"] = datetime.utcnow()
 
@@ -137,6 +140,8 @@ async def delete_card(db: AsyncIOMotorDatabase, user_id: ObjectId) -> None:
     if not card:
         raise CardNotFound()
     await db["digital_cards"].delete_one({"_id": card["_id"]})
+    import asyncio as _asyncio
+    _asyncio.create_task(delete_from_gcs(f"qr_codes/{card['slug']}.png"))
 
 
 # ---------------------------------------------------------------------------

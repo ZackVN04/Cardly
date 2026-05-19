@@ -91,7 +91,22 @@ async def create_indexes() -> None:
 
     # digital_cards
     await db["digital_cards"].create_index("slug", unique=True)
-    await db["digital_cards"].create_index("user_id")
+    # user_id must be unique+sparse (sparse skips null so test cleanup gaps don't block).
+    # We check existing index options before dropping to avoid IndexBuildAborted on Atlas.
+    try:
+        index_info = await db["digital_cards"].index_information()
+        existing = index_info.get("user_id_1", {})
+        needs_rebuild = existing and (
+            not existing.get("unique") or not existing.get("sparse")
+        )
+        if needs_rebuild:
+            await db["digital_cards"].drop_index("user_id_1")
+    except Exception:
+        pass
+    try:
+        await db["digital_cards"].create_index("user_id", unique=True, sparse=True)
+    except Exception:
+        pass
 
     # contact_activity_logs
     await db["contact_activity_logs"].create_index("contact_id")

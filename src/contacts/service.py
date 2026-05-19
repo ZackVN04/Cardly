@@ -8,6 +8,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ReturnDocument
 
 from src.activity.service import log_action
+from src.tags.service import generate_auto_tags
 from src.contacts.exceptions import (
     ContactNotFound,
     NotContactOwner,
@@ -35,12 +36,16 @@ async def create_contact(
     tag_oids: list[ObjectId] = []
     for tid in data.tag_ids:
         try:
-            tag_oids.append(ObjectId(tid))
+            oid = ObjectId(tid)
         except Exception:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Invalid tag ID: {tid}",
             )
+        tag = await db["tags"].find_one({"_id": oid, "owner_id": owner_id})
+        if not tag:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tag {tid} not found")
+        tag_oids.append(oid)
 
     event_oid = ObjectId(data.event_id) if data.event_id else None
     scan_oid = ObjectId(data.scan_id) if data.scan_id else None
@@ -75,6 +80,14 @@ async def create_contact(
         source="manual",
         new_values={"full_name": data.full_name, "company": data.company},
     )
+
+    auto_tag_ids = await generate_auto_tags(db, owner_id, inserted)
+    if auto_tag_ids:
+        await db["contacts"].update_one(
+            {"_id": result.inserted_id},
+            {"$addToSet": {"tag_ids": {"$each": auto_tag_ids}}},
+        )
+        inserted = await db["contacts"].find_one({"_id": result.inserted_id})
 
     return inserted
 
@@ -208,11 +221,6 @@ async def delete_contact(
     if contact["owner_id"] != owner_id:
         raise NotContactOwner()
 
-    await asyncio.gather(
-        db["contacts"].delete_one({"_id": contact_id}),
-        db["enrichment_results"].delete_one({"contact_id": contact_id}),
-    )
-
     await log_action(
         db=db,
         contact_id=contact_id,
@@ -220,6 +228,12 @@ async def delete_contact(
         action="deleted",
         source="user_edit",
         previous_values={"full_name": contact["full_name"], "company": contact.get("company")},
+    )
+
+    await asyncio.gather(
+        db["contacts"].delete_one({"_id": contact_id}),
+        db["enrichment_results"].delete_one({"contact_id": contact_id}),
+        db["contact_activity_logs"].delete_many({"contact_id": contact_id}),
     )
 
 
@@ -292,7 +306,7 @@ async def remove_tag(
         db=db,
         contact_id=contact_id,
         owner_id=owner_id,
-        action="tagged",
+        action="untagged",
         source="user_edit",
         changed_fields=["tag_ids"],
         previous_values={"tag_ids": [str(t) for t in contact.get("tag_ids", [])]},

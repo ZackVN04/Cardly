@@ -62,13 +62,13 @@ def mock_gcs():
         yield {"upload": mock_upload, "delete": mock_delete}
 
 
-async def test_upload_avatar_201(async_client, upload_user, mock_gcs):
+async def test_upload_avatar_200(async_client, upload_user, mock_gcs):
     r = await async_client.post(
         f"{BASE}/avatar",
         headers=_hdrs(upload_user["token"]),
         files=[_jpeg_file()],
     )
-    assert r.status_code == 201
+    assert r.status_code == 200
 
 
 async def test_upload_avatar_response_has_url(async_client, upload_user, mock_gcs):
@@ -126,7 +126,7 @@ async def test_upload_avatar_png(async_client, upload_user, mock_gcs):
         headers=_hdrs(upload_user["token"]),
         files=[("file", ("avatar.png", io.BytesIO(b"x" * 1024), "image/png"))],
     )
-    assert r.status_code == 201
+    assert r.status_code == 200
 
 
 async def test_upload_avatar_webp(async_client, upload_user, mock_gcs):
@@ -135,7 +135,7 @@ async def test_upload_avatar_webp(async_client, upload_user, mock_gcs):
         headers=_hdrs(upload_user["token"]),
         files=[("file", ("avatar.webp", io.BytesIO(b"x" * 1024), "image/webp"))],
     )
-    assert r.status_code == 201
+    assert r.status_code == 200
 
 
 async def test_upload_avatar_wrong_mime(async_client, upload_user, mock_gcs):
@@ -173,7 +173,7 @@ async def test_upload_avatar_exactly_at_limit(async_client, upload_user, mock_gc
         headers=_hdrs(upload_user["token"]),
         files=[_jpeg_file(size=exact)],
     )
-    assert r.status_code == 201
+    assert r.status_code == 200
 
 
 async def test_upload_avatar_one_byte_over_limit(async_client, upload_user, mock_gcs):

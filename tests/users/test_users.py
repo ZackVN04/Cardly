@@ -169,7 +169,7 @@ async def test_get_user_no_auth(async_client, other_user):
 
 async def test_search_users_200(async_client, user):
     r = await async_client.get(
-        f"{BASE}/search",
+        BASE,
         params={"q": user["username"]},
         headers=_hdrs(user["token"]),
     )
@@ -178,7 +178,7 @@ async def test_search_users_200(async_client, user):
 
 async def test_search_users_finds_by_username(async_client, user):
     r = await async_client.get(
-        f"{BASE}/search",
+        BASE,
         params={"q": user["username"]},
         headers=_hdrs(user["token"]),
     )
@@ -188,7 +188,7 @@ async def test_search_users_finds_by_username(async_client, user):
 
 async def test_search_users_finds_by_full_name(async_client, user):
     r = await async_client.get(
-        f"{BASE}/search",
+        BASE,
         params={"q": user["full_name"]},
         headers=_hdrs(user["token"]),
     )
@@ -197,7 +197,7 @@ async def test_search_users_finds_by_full_name(async_client, user):
 
 async def test_search_users_response_format(async_client, user):
     r = await async_client.get(
-        f"{BASE}/search",
+        BASE,
         params={"q": user["username"]},
         headers=_hdrs(user["token"]),
     )
@@ -208,7 +208,7 @@ async def test_search_users_response_format(async_client, user):
 
 async def test_search_users_no_results(async_client, user):
     r = await async_client.get(
-        f"{BASE}/search",
+        BASE,
         params={"q": "xyznonexistent123abc"},
         headers=_hdrs(user["token"]),
     )
@@ -219,7 +219,7 @@ async def test_search_users_no_results(async_client, user):
 
 async def test_search_users_case_insensitive(async_client, user):
     r = await async_client.get(
-        f"{BASE}/search",
+        BASE,
         params={"q": user["username"].upper()},
         headers=_hdrs(user["token"]),
     )
@@ -229,7 +229,7 @@ async def test_search_users_case_insensitive(async_client, user):
 
 async def test_search_users_missing_q(async_client, user):
     r = await async_client.get(
-        f"{BASE}/search",
+        BASE,
         headers=_hdrs(user["token"]),
     )
     assert r.status_code == 422
@@ -237,7 +237,7 @@ async def test_search_users_missing_q(async_client, user):
 
 async def test_search_users_no_auth(async_client, user):
     r = await async_client.get(
-        f"{BASE}/search",
+        BASE,
         params={"q": user["username"]},
     )
     assert r.status_code == 401
@@ -245,7 +245,7 @@ async def test_search_users_no_auth(async_client, user):
 
 async def test_search_users_pagination_format(async_client, user):
     r = await async_client.get(
-        f"{BASE}/search",
+        BASE,
         params={"q": user["username"], "page": 1, "limit": 5},
         headers=_hdrs(user["token"]),
     )
